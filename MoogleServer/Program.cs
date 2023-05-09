@@ -23,4 +23,5 @@ app.UseRouting();
 app.MapBlazorHub();
 app.MapFallbackToPage("/_Host");
 
+MoogleEngine.Moogle.data = new DataBase();
 app.Run();
