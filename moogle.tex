@@ -1,0 +1,271 @@
+\documentclass[options]{article}
+\title{Moogle!}
+\author{Lia S. López Rosales}
+\date{15 de julio de 2023}
+
+\begin{document}
+\maketitle
+\section{Base de Datos(Clase DataBase)}
+El presente informe tiene el objetivo de presentar y explicar las características de esta versión del buscador Moogle!\\
+El correcto funcionamiento de esta aplicación depende del contenido presente en la carpeta Content, por supuesto, este puede ser modificado a gusto del usuario ( para mayor precisión a lo hora de los resultados se recomienda que todo el contenido este en un mismo idioma, en el caso contrario puede que palabras que en las anteriores condiciones eran insignificantes adquieran significación por pertenecer al idioma de la búsqueda) con los archivos que considere pertinentes que pertenezcan a la categoría de .txt, en cualquier otro caso el archivo no será procesado en la base de datos y no contará a la hora de la búsqueda.\\
+La aplicación obtiene la dirección actual de la carpeta general y a continuación busca dentro de Content todos los .txt(s) presentes y almacena sus direcciones para su posterior análisis (estos archivos pueden estar dentro de subcarpetas, sueltos o los dos; depende totalmente del gusto del usuario).\\
+Con el conjunto de direcciones de los .txt obtenidos se procede a la normalización (llamaremos normalizar a la eliminación de tildes, mayúsculas y cualquier carácter que no sea una letra o un número, comprendido entre tres métodos NormalizeExpresion, NormalizeString y Document) de dichos textos para generalizar lo más posible los resultados, es decir evitar que detalles como la falta o inclusión de tildes y el uso o no de mayúsculas reduzcan los resultados relevantes.\\
+Para ello se utilizan métodos internos estándar como .ToLower y se añade el uso de la librería TextRegularExpressions con el método Regex.\\
+A continuación se analizan estos ,se crea el vocabulario de nuestra base de datos (conjunto de todas las palabras pertenecientes a esta, obviamente sin repeticiones de las mismas, se desarrolla en el método Uniquewords en el cual a la vez se obtienen elementos necesarios para los siguientes pasos del procesamiento) y se comienza  la vectorización de los mismos (este proceso se realiza sobre la base de la técnica de  Term Frequency-Inverse Document Frequency(TF-IDF) y sus algoritmos correspondientes). Este es una medida numérica que representa la relevancia de un documento en un conjunto de ellos, el TF aumenta con la frecuencia de una palabra en el documento mientras el IDF aumenta con la disminución de la cantidad de documentos que contienen la palabra por lo que se compensan entre sí y resulta muy efectivo a la hora de eliminar la influencia de palabras muy comunes en la base de datos (como es el caso de preposiciones, conjunciones, en general las conocidas como stop-words).\\
+En el caso del TF se calcula a través de la siguiente fórmula:\\
+\begin{equation}
+    TF = \frac{frecuencia del termino en el documento}{longitud del documento}  
+\end{equation}
+Mientras el IDF se basa en la siguiente:\\
+\begin{equation}
+    IDF = \log \frac{cantidad de documentos}{cantidad de documentos que contienen la palabra}  
+\end{equation}
+Se multiplican ambos valores para cada palabra y se obtiene un vector que representa el contenido del texto:\\
+\begin{equation}
+    TF-IDF = TF\times IDF
+\end{equation}
+De este cálculo se encargan los métodos BruteFrecuency(1), InverseFrecuency(2) y TF$-$IDF(3) respectivamente.\\
+El conjunto o matriz formado por cada uno de estos vectores es nuestra base de datos, sobre los que se va a procesar los resultados de cada una de las búsquedas ingresadas.\\
+Se considera vector en este sentido a una tabla donde cada espacio representa una palabra del vocabulario y el valor su importancia (Todos los vectores presentan una misma longitud, la ausencia de la palabra en el documento se representa por 0 , igualmente a raíz del cálculo de IDF una palabra que aparece en todos los documentos es representada también por 0)\\
+\begin{center}
+    \begin{tabular}{|c|c|c|}
+        \hline
+        Términos/Documentos & Doc1 & Doc2\\
+        \hline
+        word1 & 0,24 & 0,45\\
+        \hline
+        word2 & 0 & 0,6\\
+        \hline
+    \end{tabular}\\
+    \textit{\small{Ejemplo de como va quedando dicha tabla}}
+\end{center}
+Esta base solo se calcula una vez por sesión, mediante la creación de una variable que llama al constructor de una clase DataBase dónde se indican y ejecutan los instrucciones de creación de la misma( explicadas anteriormente), lo que conlleva tanto a beneficios como desventajas:\\
+\begin{itemize}
+    \item Beneficios : No es necesario volver a procesar esta por cada búsqueda lo que mejora la rapidez de respuesta de la aplicación (solo es al abrir la aplicación que esta se calcula).
+    \item Desventajas: No se actualiza automáticamente, por lo que si el usuario realiza alguna adición, eliminación o modificación al contenido este no se contará hasta que la aplicación se reinicie.
+\end{itemize}
+\textit{No existe límite en la cantidad de documentos o su longitud en la base de datos pero estos aspectos influirán directamente en la velocidad de procesamiento}
+\section{Clase Auxiliaries}
+\subsection{Búsqueda}
+Después de creada y cargada la base de datos, se espera a que el usuario ingrese una búsqueda y se procesa esta a continuación.\\
+Se normaliza esta y se comienza el proceso de vectorización de la misma ( como si fuera uno de los documentos)(se utiliza los mismos pasos anteriores adaptados) , a la misma vez empieza a calcularse la sugerencia correspondiente pues en caso de existir el vector original de la búsqueda podría verse alterado.\\
+Haciendo un inciso en la sugerencia, esta es calculada mediante un método que se apoya en el algoritmo de la “Distancia de Levenshtein” (también llamado distancia de edición, se creo un método auxiliar de mismo nombre utilizado en el método principal Suggestion), este se puede definir como el número mínimo de operaciones necesarias para transformar una palabra en otra indicada, por lo cual es muy útil para definir cuándo una palabra es similar a otra si se establece un umbral de similitud (máxima distancia con la que consideraremos que son semejantes las palabras) en el caso del Moogle! Actual se estableció el umbral en “3”(este no posee un valor predeterminado en general por lo cual depende enteramente de la situación y se consideró que 3 otorgaba suficiente libertad de opciones a las sugerencias manteniendo un grado adecuado de similitud).\\
+El calculo de la sugerencia de una búsqueda parte del reconocimiento de los términos ajenos al vocabulario existente, si todos los términos pertenecen a este el resultado será 
+\textit{“No hay sugerencias disponibles para esta búsqueda”}
+; de lo contrario se pasará a analizar posibles alternativas a dichas palabras.\\
+Este análisis es individual por cada palabra así que es posible tener resultados válidos para una de las palabras y para la otra no. Este resultado se adquiere al calcular la distancia de edición de la palabra en cuestión con cada uno de los términos del vocabulario, se almacena la menor de ellas y se compara con el umbral; si cumple con la condición se tiene una sugerencia válida que se enseñará al usuario de lo contrario no se contará para esta.\\
+\textbf{\textit{Es posible que exista más de un término que presente la distancia mínima con la palabra analizada, en ese caso se tomará en cuenta la que se encuentre primero}}\\
+La sugerencia se devuelve en el mismo formato que la búsqueda es decir si esta poseía palabras del vocabulario y ajenas se devolverá con esa misma estructura y orden, simplemente se sustituirán las ajenas con las similares encontradas (si son más de una y una de ellas no tenía resultados válidos esta se mantendrá como la original).\\
+\textbf{\textit{Si existen palabras ajenas y ninguno posee resultados válidos en el vocabulario existente el resultado es}}
+\textit{“No hay sugerencias disponibles para esta búsqueda”}\\
+\textbf{\textit{Se avisa al usuario de que la sugerencia devuelta no siempre implica mayor criterio a la hora de los resultados pues se puede dar el caso de que el resultado sea una palabra común que no otorgue relevancia alguna.}}\\
+Los resultados válidos de la búsqueda afectarán al vector de la misma pues se añadirá frecuencia a las nuevas palabras(Todo el proceso de confirmación del vector búsqueda queda a cargo del método WordsofSearch)\\
+Volviendo al procesamiento de la búsqueda una vez se tiene el vector de la misma( con los cambios pertinentes de la sugerencia) se procede a la aplicación del operador ($\ast$)(\ref{potency}) y luego a la comparación de este con el de cada uno de los documentos de la base de datos mediante un algoritmo llamado “similitud de cosenos”(presente igualmente como algoritmo auxiliar CosineSimilarity), la cual es una medida para calcular la similitud entre dos vectores (está se mueve entre 0 y 1, a mayor resultado mayor similitud) como nuestros vectores están compuestos por palabras está indica que tan parecidos son los dos textos.\\
+La fórmula para este algoritmo es la siguiente:\\
+\begin{equation}
+    similaridad = \frac{producto punto}{magnitud de la busqueda \times magnitud del documento} 
+\end{equation}
+\begin{itemize}
+    \item Productopunto es la multiplicación del vector de la búsqueda por el vector del documento que se está analizando
+    \item Magnitud del vector( también llamado norma, representa la longitud del vector en el espacio) se calcula a través de la siguiente fórmula:\\
+    \begin{equation}
+        magnitud = \sqrt{x_{1}^{2} + x_{2}^{2} + ... + x_{n}^{2}}
+    \end{equation}
+    \begin{itemize}
+        \item $x_{i}$ es cada uno de los valores del vector
+    \end{itemize}
+\end{itemize}
+A este valor de similitud es lo que denominamos como Score del documento y es el criterio por el cual se ordenarán y añadirán los documentos a los resultados finales(otros criterios para añadir resultados dependen de los operadores (¡)(\ref{exclusion}) y (\textasciicircum)(\ref{inclusion})).\\
+Los resultados finales van dados en un conjunto de objetos del tipo SearchItem que almacenan Score, Title(título) y Snippet.\\
+Una vez se comprueba que un documento posee un Score superior a 0 se procede a buscar su título correspondiente ( en nuestro concepto de matriz a cada documento le corresponde una columna de esta con un orden correspondiente al cual se leen sus direcciones al principio de la creación de la base de datos, se utiliza este hecho para asociar columna con dirección y extraer el título correspondiente al .txt en el método Index) y se calcula el Snippet, el fragmento del texto más relevante respecto a la búsqueda analizada (la longitud de este es generalmente de alrededor de 50 palabras a menos que el documento analizado posee una longitud menor a esto en cuyo caso será de aproximadamente la mitad de dicha longitud).\\
+La relevancia del fragmento se define a través de la cantidad de coincidencias con las palabras relevantes de la búsqueda que se pueden encontrar en él (estas coincidencias pueden ser de una misma palabra o de una variedad de ellas). El cálculo del Snippet parte de una cuenta inicial de coincidencias en el primer fragmento de la longitud establecida y a partir de ahí se van analizando los índices siguientes, es decir se analiza el que está a continuación del índice final y del índice inicial para cubrir todos los posibles fragmentos del documento.\\
+Siempre va a existir algún Snippet para el documento pues para que este calificara para los resultados debía contener por lo menos una vez una de las palabras de la búsqueda, en ese caso justamente ese será el fragmento devuelto.\\
+Todos los procesos explicados del Snippet se realizan en un método de igual nombre\\
+En el caso de no encontrarse ningún documento que cumpla las condiciones para ser añadido a los resultados se añadirá y devolverá un solo SearchItem:\\
+\textbf{\textit{Ejemplo}}\\
+\textit{Búsqueda: Xcydtini}\\
+\textit{Resultados:}
+\begin{itemize}
+    \item \textbf{No se encontraron textos coincidentes}
+\end{itemize}
+\textit{Por favor realice una búsqueda diferente …}\\
+\\
+\\
+Una vez llegado a este punto la aplicación está casi lista para finalizar su procesamiento, a partir de aquí solo resta juntar todos los resultados y devolverlos al usuario ordenados por orden de relevancia (esto se logra a través del valor del Score y un método de ordenamiento basado en el algoritmo de inserción(Order)) . El método RelevantDocuments se encarga de todos estos pasos .A continuación se muestran dos ejemplos del funcionamiento de la misma, uno inválido y otro válido
+\begin{enumerate}
+    \item \textit{Búsqueda: catt and harts}\\
+    \textit{Sugerencia : ¿ Quisiste decir \underline{cast and parts?}}\\
+    \textit{Resultados:}
+    \begin{itemize}
+        \item \textbf{\textit{The Strange Case Of Dr. Jekyll And Mr. Hyde}}\\
+        \textit{… mountain bandit (…) pursuit jekyll (…) to cast (…) to pamper to cast …}
+        \item \textbf{\textit{The …}}
+    \end{itemize}
+    \item \textit{Búsqueda: granadinas}\\
+    \textit{Sugerencia: ¿ Quisiste decir \underline{No hay sugerencias disponibles para esta búsqueda?}}\\
+    \textit{Resultados:}
+    \begin{itemize}
+        \item \textbf{\textit{No se encontraron textos coincidentes}}\\
+        \textit{Por favor realice una búsqueda diferente}
+    \end{itemize}
+\end{enumerate}
+Este es el funcionamiento básico de la aplicación y su comportamiento, mas también están disponibles algunos operadores que podrían ayudar al usuario a obtener resultados más específicos a sus deseos.
+\subsection{Operadores}
+\subsubsection{Potenciación($\ast$)}\label{potency}
+\begin{center}
+    \textit{\small{Otorga mayor importancia a la palabra a la que antecede}}\\
+\end{center}
+Este operador es múltiple es muchos sentidos, puede ser utilizado por supuesto en más de una palabra de la búsqueda y pueden ser más de uno por palabra \\
+\textbf{Ejemplo:}\\
+\textit{$\ast \ast \ast$ Alice and the $\ast$ cat}\\
+Este operador modifica los valores del vector de la búsqueda por lo que se implementa durante la confección del mismo, utiliza un método que a través del método Regex identifica las palabras que poseen asteriscos, se analiza cuántos tiene cada una de ellas y se multiplica el valor de su posición correspondiente en el vector por 2 por cada asteriscos.
+\begin{center}
+    Apoyándonos en el ejemplo anterior el valor se transformaría de la siguiente forma:\\
+    \textit{Valor(Alice)$\times $6, … , Valor(And), … ,Valor(the), … ,Valor(cat)$\times $2}
+\end{center}
+A la hora de aplicar este operador también se tiene en cuenta los cambios ocasionados por la sugerencia, es decir si una de las palabras no existiera en el vocabulario pero existe una sugerencia válida se calculará el operador según la sugerencia
+\begin{center}
+    \textit{$\ast \ast $Alic and the cat}\\
+    \textit{Valor(Alice)$\times $4}\\
+\end{center}
+Este operador está contenido en el método WordswithAsterisk.\\
+\subsubsection{Exclusión(!)}\label{exclusion}
+\begin{center}
+    \textit{Indica que el término no debe aparecer en los documentos del resultado}
+\end{center}
+Este operador sigue el mismo patrón del anterior y utiliza el método Regex para identificar la palabra(s) que no deben aparecer, a continuación se procede a analizar su presencia en el documento por cada palabra que presente el símbolo en la búsqueda. Este operador afecta a los resultados por lo cual solo si implementa una vez calculado el Score y comprobado su validez, devuelve un bool y  si uno de los términos este presente en el documento su valor es automáticamente falso y se dejan de analizar el resto de términos en el caso de existir más.\\
+\\
+\textbf{Ejemplo:}\\
+\textit{Documento: Alice in Wonderland}\\
+\textit{Búsqueda: Alice visit  !France and the !queen}\\
+\textit{Operador !: france(true) queen(false)}\\
+\textit{Resultado final: false}\\
+\\
+Al igual que en el operador Potenciación este tiene en cuenta los cambios que conlleva la sugerencia y funciona según esta si es necesario. La denominación del método es equivalente a su función (Exclusion).
+\subsubsection{Inclusión(\textasciicircum)}\label{inclusion}
+\begin{center}
+    \textit{Indica que el término necesariamente debe aparecer en los documentos del resultado}
+\end{center}
+Su funcionamiento es análogo al del operador Exclusión, simplemente en vez de verificar que los términos no aparezcan verifica que estos estén presentes en el documento analizado, al igual que el caso anterior si el documento incumple al menos una de las condiciones (en este caso la presencia de un término(s) específico) su valor es automático falso y no es válido como resultado.\\
+Igualmente tiene en cuenta la presencia de la sugerencia y es funcional según esta.\\
+Su método se denomina Inclusion.\\
+\textbf{Ejemplo:}\\
+\\
+\textit{Documento: A Study in Scarlet}\\
+\textit{Búsqueda: \textasciicircum Sherlock in \textasciicircum Wonderland and Dr. \textasciicircum Watson}\\
+\textit{Operador \textasciicircum : sherlock(true) wonderland(false)}\\
+\textit{Resultado final: false}\\
+\subsubsection{Cercanía (\textasciitilde)}
+\begin{center}
+    \textit{Otorga mayor relevancia al documento en dependencia de cuan cercanas están un o más pares de palabras indicadas}
+\end{center}
+Este operador se encuentra dividido en dos métodos(CloseSearch y Close), el primero de ellos revisa la presencia del símbolo en la búsqueda (a través de un método Regex y un patrón especificado) y en caso de existir extrae los pares de palabras\\
+En casos como: \textit{Alice \textasciitilde} \textit{cat \textasciitilde} \textit{queen.}  Se extraen dos pares (Alice y cat) y (cat y queen).\\
+\textbf{\textit{Es fundamental para su correcto funcionamiento que se deje espacio entre las palabras y el símbolo}}\\
+\textbf{Ejemplo: }\textit{Alice\textasciitilde cat} (no funcionará)\\
+Casos como:\\
+\begin{enumerate}
+    \item \textit{\textasciitilde} \textit{Alice cat}
+    \item \textit{Alice cat} \textit{\textasciitilde}\\
+    Se tratarán como si no existiera los símbolos
+    \item \textit{Alice }\textit{\textasciitilde} \textit{\textasciitilde} \textit{\textasciitilde} \textit{cat}\\
+    Se tratará como si fuera un solo símbolo
+\end{enumerate}
+Al igual que los anteriores operadores este tiene en cuenta los cambios que conlleva la existencia de una sugerencia válida.\\
+Una vez establecidos los pares se procede en el segundo método a calcular la menor distancia entre todos los pares existentes, estas se suman y se calculan como denominador de una fracción con numerador constante, este resultado se suma al Score del documento analizado.
+\subsubsection{General}
+\begin{center}
+    \textit{Condiciones de combinaciones de los operadores}
+\end{center}
+\begin{enumerate}
+    \item \textit{En una búsqueda se pueden utilizar cuántos operadores se deseen(por palabra)}\\
+    \textit{Ejemplo:}\\
+    \textit{Búsqueda: $\ast \ast \ast $Alice \textasciitilde} \textit{cat  and the\textasciicircum queen of !England}
+    \item \textit{Si se utilizan dos o más operadores en una misma palabra solo se aplica el más interno a la palabra}\\
+    \textit{Ejemplo:}\\
+    \textit{Búsqueda:}
+    \begin{itemize}
+        \item \textit{!\textasciicircum Alice }(devolverá los documentos donde aparece la palabra alice)\\
+        \item \textit{\textasciicircum !Alice} (devolverá los documentos donde no aparece la palabra)
+    \end{itemize}
+    \textit{Lo mismo ocurre con el operador ($\ast $), no aplica al operador cercanía por su necesidad de estar separado.}
+\end{enumerate}
+\subsection{Clases Algebraicas}
+En estas clases se almacenan un conjunto de métodos de operaciones realizables con matrices y vectores que pueden ser de utilidad en el tipo de cálculos que se ejecutan en esta aplicación. A continuación se nombrarán y explicarán brevemente cada uno de ellos:\\
+\subsubsection{Clase Matrix}
+\begin{enumerate}
+    \item Sum\\
+    \textit{Suma de matrices}\\
+    Este método comprueba en primer que las matrices pasadas como parámetros sean válidas, en este concepto se consideran válidas para la suma si las matrices son del mismo tamaño, para ello se utiliza un método privado que comprueba justamente esto. Después de esta comprobación se procede a ejecutar la suma:\\
+    \begin{equation}
+        A + B = a_{ij} + b_{ij} = C
+    \end{equation}
+    \begin{itemize}
+        \item \textit{A,B $\in $ M(conjunto de las matrices)}
+        \item \textit{i,j ndices de fila y columna}
+        \item \textit{C matriz resultado}
+    \end{itemize}
+    \textit{La matriz resultado es la matriz donde en cada posición tiene la suma de las posiciones correspondientes de las matrices sumadas}
+    \item Scalar$\times $Matrix\\
+    \textit{Multiplicación de una matriz por un escalar}\\
+    El método recibe una matriz y un escalar y procede a multiplicar cada posición de la matriz por el escalar:
+    \begin{equation}
+        d\times A = d\times (a_{ij})
+    \end{equation}
+    \begin{itemize}
+        \item \textit{d es un escalar}
+        \item \textit{A $\in $ M(conjunto de las matrices)}
+        \item \textit{i,j índices de fila y columna}
+    \end{itemize}
+    \item Matrix$\times $Matrix\\
+    \textit{Multiplicación de dos matrices}\\
+    Este método en primer lugar comprueba que se pueda realizar la operación, para ello hace uso de un método auxiliar que comprueba que las matriz A tenga la misma cantidad de columnas que filas la matriz B, también analiza el caso de que los parámetros fueran ingresados en el orden equivocado y las organiza ( ya que esta multiplicación no es conmutativa)\\
+    \begin{equation}
+        \sum_{n = 1}^{p}  a_{ik} \times \times b_{kj}
+    \end{equation}
+    \begin{itemize}
+        \item \textit{i,j son índices de fila y columna}
+        \item \textit{k es el índice común de las columnas de la primera matriz y las filas de la segunda}
+    \end{itemize}
+    \textit{El resultado es una matriz de tamaño (cantidad de filas de la primera matriz, cantidad de columnas de la segunda) donde cada fila de la inicial se multiplica por las columna de la segunda para obtener los nuevos valores.}
+    \item Matri$\times $Vector\\
+    \textit{Multiplicación de una matriz por un vector}
+    Al igual que en los anteriores métodos primero se comprueba el cumplimiento de los requisitos para poder realizar la operación (a través de un método privado), en este caso que el vector tenga una longitud igual a la cantidad de columnas de la matriz,(se trata de un vector columna).
+    \begin{equation}
+        \sum x_{i} \times c_{i}
+    \end{equation}
+    \begin{itemize}
+        \item \textit{$c_{i}$ son cada una de las filas de la matriz}
+        \item \textit{$x_{i}$ son los valores del vector}
+    \end{itemize}
+    \textit{El resultado es un nuevo vector de longitud de la cantidad de filas de la matriz donde los valores son el resultado de multiplicar cada fila por el vector}
+    
+\end{enumerate}
+\textbf{\emph{Los métodos están definidos para recibir valores double para permitir mayor libertad de precisión al usuario, se define matriz como un array bidimensional (a[,])}}
+\subsubsection{Clase Vector}
+\begin{enumerate}
+    \item Sum\\
+    \textit{Suma de dos vectores}\\
+    Los procedimientos son semejantes a los implementados en la suma de matrices
+    \begin{equation}
+        C = a_{i} + b_{i}
+    \end{equation}
+    \item Scalar$\times $Vector\\
+    \textit{Multiplicación de un escalar por un vector}\\
+    Igualmente se procede igual al método Scalar$\times $Matrix pero tratando con un vector
+    \begin{equation}
+        d \times A = d \times a_{i}
+    \end{equation}
+    \item Vector$\times $Vector\\
+    \textit{Multiplicación de vectores}\\
+    Este método comprueba en primer lugar si los vectores son multiplicables entre sí, es decir si poseen una misma longitud, y procede a multiplicarlos
+    \begin{equation}
+        e = \sum a_{i}\times b_{i}
+    \end{equation}
+    \textit{El resultado es el valor resultante de sumar el producto de cada una de las posiciones correspondientes a ambos vectores}
+    \item Magnitude\\
+    \textit{Calcula la magnitud o norma de un vector}\\
+    Método que calcula el valor que representa la extensión de un valor en el espacio.(5)
+\end{enumerate}
+\textbf{\emph{En esta clase también se utilizan valores double y se representan los vectores como arrays(a[])}}
+\end{document}
