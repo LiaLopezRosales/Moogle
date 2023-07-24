@@ -34,6 +34,7 @@ elif [ "$option" = "report" ]; then
 cd ..
 cd Informe
 pdflatex moogle.tex
+pdflatex moogle.tex
 
 elif [ "$option" = "slides" ]; then 
 cd ..
@@ -43,7 +44,7 @@ pdflatex Presentación.tex
 elif [ "$option" = "show_report" ]; then
 cd ..
 cd Informe
-  if [ -f moogle.log ]; then
+  if [ -f moogle.pdf ]; then
   echo "Introduzca comando del visualizador de su preferencia en caso de poseer ninguno introduzca 1"
   read lector
     if [ "$lector" != "1" ]; then
@@ -52,6 +53,7 @@ cd Informe
     xdg-open moogle.pdf
     fi
   else 
+  pdflatex moogle.tex
   pdflatex moogle.tex
   echo "Introduzca comando del visualizador de su preferencia en caso de poseer ninguno introduzca 1"
   read lector
@@ -65,7 +67,7 @@ cd Informe
 elif [ "$option" = "show_slides" ]; then
 cd ..
 cd Presentación
-  if [ -f Presentación.log ]; then
+  if [ -f Presentación.pdf ]; then
   echo "Introduzca comando del visualizador de su preferencia en caso de poseer ninguno introduzca 2"
   read lector
     if [ "$lector" != "2" ]; then
@@ -88,6 +90,9 @@ cd ..
 cd Informe
   if [ -f moogle.log ]; then
   rm -v moogle.log
+  fi
+  if [ -f moogle.aux ]; then
+  rm -v moogle.aux
   fi
   if [ -f moogle.pdf ]; then
   rm -v moogle.pdf
