@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 
+function ctrl_c() {
+echo Cerrando Moogle!
+cd Script
+}
+
+trap ctrl_c INT
+
 if [ $# -eq 0 ]; then
 echo "Selecione una opción"
 echo "run - Abre la aplicación Moogle!"
@@ -21,6 +28,7 @@ while [ "$option" != "Salir" ]; do
 if [ "$option" = "run" ]; then 
 cd ..
 make dev
+
 
 elif [ "$option" = "report" ]; then 
 cd ..
@@ -79,37 +87,65 @@ elif [ "$option" = "clean" ]; then
 cd ..
 cd Informe
   if [ -f moogle.log ]; then
-  rm moogle.log
-  fi
-  if [ -f moogle.aux ]; then
-  rm moogle.aux
+  rm -v moogle.log
   fi
   if [ -f moogle.pdf ]; then
-  rm moogle.pdf
+  rm -v moogle.pdf
   fi
+  if [ -f moogle.fdb_latexmk ]; then
+  rm -v moogle.fdb_latexmk
+  fi
+  if [ -f moogle.fls ]; then
+  rm -v moogle.fls
+  fi
+  if [ -f moogle.synctex.gz ]; then
+  rm -v moogle.synctex.gz
+  fi
+
 cd ..
 cd Presentación
   if [ -f Presentación.aux ]; then
-  rm Presentación.aux
+  rm -v Presentación.aux
   fi
   if [ -f Presentación.log ]; then
-  rm Presentación.log
+  rm -v Presentación.log
   fi
   if [ -f Presentación.nav ]; then
-  rm Presentación.nav
+  rm -v Presentación.nav
   fi
   if [ -f Presentación.out ]; then
-  rm Presentación.out
+  rm -v Presentación.out
   fi
   if [ -f Presentación.pdf ]; then
-  rm Presentación.pdf
+  rm -v Presentación.pdf
   fi
   if [ -f Presentación.snm ]; then
-  rm Presentación.snm
+  rm -v Presentación.snm
   fi
   if [ -f Presentación.toc ]; then
-  rm Presentación.toc
+  rm -v Presentación.toc
   fi
+cd ..
+cd MoogleEngine
+  if [ -d bin ]; then
+  rm -r bin
+  echo "bin borrado"
+  fi
+  if [ -d obj ]; then
+  rm -r obj
+  echo "obj borrado"
+  fi
+cd ..
+cd MoogleServer
+  if [ -d bin ]; then
+  rm -r bin
+  echo "bin borrado"
+  fi
+  if [ -d obj ]; then
+  rm -r obj
+  echo "obj borrado"
+  fi
+
 echo "Archivos eliminados"
 elif [ "$option" = "add" ]; then
 echo "Por favor introduzca ruta completa del archivo que desea agregar"

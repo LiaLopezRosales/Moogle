@@ -2,11 +2,15 @@
 \title{Moogle!}
 \author{Lia S. López Rosales}
 \date{15 de julio de 2023}
-
+\renewcommand{\abstractname}{Resumen}
 \begin{document}
 \maketitle
+\begin{abstract}
+El presente informe tiene el objetivo de presentar y explicar las características de esta versión de la aplicación Moogle!\\ 
+Moogle! es un buscador léxico que trabaja en un conjunto local de documentos de extensión .txt y realiza un análisis de estos en función de parámetros introducidos por el usuario lo que se conocerá como búsqueda. Esta puede ser simple o ser complementada por el uso de operadores que se presentarán posteriormente en el documento (\ref{Operators}). \\
+A continuación se trata y explica cada una de las estructuras y funciones que presenta Moogle!
+\end{abstract}
 \section{Base de Datos(Clase DataBase)}
-El presente informe tiene el objetivo de presentar y explicar las características de esta versión del buscador Moogle!\\
 El correcto funcionamiento de esta aplicación depende del contenido presente en la carpeta Content, por supuesto, este puede ser modificado a gusto del usuario ( para mayor precisión a lo hora de los resultados se recomienda que todo el contenido este en un mismo idioma, en el caso contrario puede que palabras que en las anteriores condiciones eran insignificantes adquieran significación por pertenecer al idioma de la búsqueda) con los archivos que considere pertinentes que pertenezcan a la categoría de .txt, en cualquier otro caso el archivo no será procesado en la base de datos y no contará a la hora de la búsqueda.\\
 La aplicación obtiene la dirección actual de la carpeta general y a continuación busca dentro de Content todos los .txt(s) presentes y almacena sus direcciones para su posterior análisis (estos archivos pueden estar dentro de subcarpetas, sueltos o los dos; depende totalmente del gusto del usuario).\\
 Con el conjunto de direcciones de los .txt obtenidos se procede a la normalización (llamaremos normalizar a la eliminación de tildes, mayúsculas y cualquier carácter que no sea una letra o un número, comprendido entre tres métodos NormalizeExpresion, NormalizeString y Document) de dichos textos para generalizar lo más posible los resultados, es decir evitar que detalles como la falta o inclusión de tildes y el uso o no de mayúsculas reduzcan los resultados relevantes.\\
@@ -110,7 +114,7 @@ Una vez llegado a este punto la aplicación está casi lista para finalizar su p
     \end{itemize}
 \end{enumerate}
 Este es el funcionamiento básico de la aplicación y su comportamiento, mas también están disponibles algunos operadores que podrían ayudar al usuario a obtener resultados más específicos a sus deseos.
-\subsection{Operadores}
+\subsection{Operadores}\label{Operators}
 \subsubsection{Potenciación($\ast$)}\label{potency}
 \begin{center}
     \textit{\small{Otorga mayor importancia a la palabra a la que antecede}}\\
