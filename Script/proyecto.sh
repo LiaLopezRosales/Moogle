@@ -12,8 +12,8 @@ echo "Selecione una opción"
 echo "run - Abre la aplicación Moogle!"
 echo "report - Genera informe de Moogle!"
 echo "slides - Genera presentación de Moogle!"
-echo "show_report - Muestra el informe de Moogle!"
-echo "show_slides - Muestra la presentación de Moogle!"
+echo "show_report - Muestra el informe de Moogle!(Una vez ingresada la opción se puede elegir el visualizador que se desee utilizar)"
+echo "show_slides - Muestra la presentación de Moogle!(Una vez ingresada la opción se puede elegir el visualizador que se desee utilizar)"
 echo "clean - Elimina archivos innecesarios que se crean en la ejecución de opciones anteriores"
 echo "add - Añade archivos para buscar por Moogle!(se recomienda que estos sean .txt pues en caso contrario no impactarán en la búsqueda)"
 echo "Salir"
@@ -45,7 +45,7 @@ elif [ "$option" = "show_report" ]; then
 cd ..
 cd Informe
   if [ -f moogle.pdf ]; then
-  echo "Introduzca comando del visualizador de su preferencia en caso de poseer ninguno introduzca 1"
+  echo "Introduzca comando del visualizador de su preferencia en caso de no poseer ninguno introduzca 1"
   read lector
     if [ "$lector" != "1" ]; then
     $lector moogle.pdf
@@ -55,7 +55,7 @@ cd Informe
   else 
   pdflatex moogle.tex
   pdflatex moogle.tex
-  echo "Introduzca comando del visualizador de su preferencia en caso de poseer ninguno introduzca 1"
+  echo "Introduzca comando del visualizador de su preferencia en caso de no poseer ninguno introduzca 1"
   read lector
     if [ "$lector" != "1" ]; then
     $lector moogle.pdf
@@ -68,7 +68,7 @@ elif [ "$option" = "show_slides" ]; then
 cd ..
 cd Presentación
   if [ -f Presentación.pdf ]; then
-  echo "Introduzca comando del visualizador de su preferencia en caso de poseer ninguno introduzca 2"
+  echo "Introduzca comando del visualizador de su preferencia en caso de no poseer ninguno introduzca 2"
   read lector
     if [ "$lector" != "2" ]; then
     $lector Presentación.pdf
@@ -77,7 +77,7 @@ cd Presentación
     fi
   else
   pdflatex Presentación.tex
-  echo "Introduzca comando del visualizador de su preferencia en caso de poseer ninguno introduzca 2"
+  echo "Introduzca comando del visualizador de su preferencia en caso de no poseer ninguno introduzca 2"
   read lector
     if [ "$lector" != "2" ]; then
     $lector Presentación.pdf
@@ -87,6 +87,10 @@ cd Presentación
   fi
 elif [ "$option" = "clean" ]; then 
 cd ..
+  if [ -d .vscode ]; then
+  rm -r .vscode
+  echo ".vscode borrado"
+  fi
 cd Informe
   if [ -f moogle.log ]; then
   rm -v moogle.log
@@ -140,6 +144,10 @@ cd MoogleEngine
   rm -r obj
   echo "obj borrado"
   fi
+  if [ -d .vscode ]; then
+  rm -r .vscode
+  echo ".vscode borrado"
+  fi
 cd ..
 cd MoogleServer
   if [ -d bin ]; then
@@ -172,8 +180,8 @@ echo "Selecione una opción"
 echo "run - Abre la aplicación Moogle!"
 echo "report - Genera informe de Moogle!"
 echo "slides - Genera presentación de Moogle!"
-echo "show_report - Muestra el informe de Moogle!"
-echo "show_slides - Muestra la presentación de Moogle!"
+echo "show_report - Muestra el informe de Moogle!(Una vez ingresada la opción se puede elegir el visualizador que se desee utilizar)"
+echo "show_slides - Muestra la presentación de Moogle!(Una vez ingresada la opción se puede elegir el visualizador que se desee utilizar)"
 echo "clean - Elimina archivos innecesarios que se crean en la ejecución de opciones anteriores"
 echo "add - Añade archivos para buscar por Moogle!(se recomienda que estos sean .txt pues en caso contrario no impactarán en la búsqueda)"
 echo "Salir"
