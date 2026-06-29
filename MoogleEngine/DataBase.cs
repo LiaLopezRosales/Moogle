@@ -1,6 +1,8 @@
 ﻿using System.Text;
 using System.Text.RegularExpressions;
 
+namespace MoogleEngine;
+
 public class DataBase
 {
   public MoogleEngine.InvertedIndex Index { get; private set; }

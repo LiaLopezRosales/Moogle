@@ -1,3 +1,5 @@
+namespace MoogleEngine;
+
 public static class SpanishStemmer
 {
     static string[] VOWELS = ["a", "e", "i", "o", "u", "á", "é", "í", "ó", "ú", "ü"];

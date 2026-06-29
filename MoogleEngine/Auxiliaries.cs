@@ -1,5 +1,7 @@
 ﻿using System.Text.RegularExpressions;
 
+namespace MoogleEngine;
+
 class Auxiliaries
 {
   static int LevenshteinDistance(string a, string b)
