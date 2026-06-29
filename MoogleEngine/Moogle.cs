@@ -3,12 +3,9 @@
 
 public static class Moogle
 {
-    public static DataBase data;
+    public static DataBase data = null!;
     public static SearchResult Query(string query) {
-
-        SearchItem[] items = data.Query(query).Item1;
-        string suggestion = data.Query(query).Item2;
-        
-        return new SearchResult(items, suggestion);
+        var result = data.Query(query);
+        return new SearchResult(result.Item1, result.Item2);
     }
 }

@@ -6,19 +6,31 @@ public class DataBase
   string[] directions;
   Tuple<string[],int[,],int[],int[]> procesed; 
   double[,] tfidf;
+  string[][] docs;
  /*Constructor con el cual al llamar "new DataBase()" cree nuestra base de datos de los documentos 
- presentes en la carpeta content(ejecuta los métodos(presentes en su mayoría en esta misma clase)
- en el orden adecuado para este proposito)*/
+  presentes en la carpeta content(ejecuta los métodos(presentes en su mayoría en esta misma clase)
+  en el orden adecuado para este proposito)*/
   public DataBase()
   {
     string ruta = Directory.GetParent(Path.Combine(Directory.GetCurrentDirectory()))!.FullName!;
     string file = Path.Combine(ruta,"Content");
+    if (!Directory.Exists(file)) {
+      throw new DirectoryNotFoundException($"La carpeta 'Content' no existe. Se esperaba en: {file}");
+    }
     directions = Directory.GetFiles(file,"*txt*",SearchOption.AllDirectories);
+    if (directions.Length == 0) {
+      throw new InvalidOperationException($"No se encontraron archivos .txt en la carpeta 'Content' ({file}). Agrega documentos de texto antes de ejecutar la aplicación.");
+    }
     procesed = UniqueWords(directions);
     double[,] matrix = BruteFrecuency(directions,procesed.Item2,procesed.Item4);
     double[] idf = InverseFrecuency(directions,procesed.Item1,procesed.Item3);
     tfidf=TF_IDF(matrix,idf);
 
+    docs = new string[directions.Length][];
+    for (int i = 0; i < directions.Length; i++)
+    {
+      docs[i] = Document(directions[i]);
+    }
   }
     
   //Método para procesar un texto
@@ -39,6 +51,10 @@ public static string[] NormalizeString(string content)
 
   string[] temporal = content.Split(new[]{' '},StringSplitOptions.RemoveEmptyEntries);
   
+  for (int i = 0; i < temporal.Length; i++)
+  {
+    temporal[i] = SpanishStemmer.Stem(temporal[i]);
+  }
 
 return temporal;
 }
@@ -173,7 +189,7 @@ public Tuple<MoogleEngine.SearchItem[],string> Query(string query)
  {
   suggestion="No hay sugerencias disponibles para esta búsqueda";
  }
- return new Tuple<MoogleEngine.SearchItem[],string>(Auxiliaries.RelevantDocuments(query,queryvector,directions,tfidf,procesed.Item1,procesedquery.Item3,procesedquery.Item2),suggestion);
+  return new Tuple<MoogleEngine.SearchItem[],string>(Auxiliaries.RelevantDocuments(query,queryvector,directions, docs, tfidf,procesed.Item1,procesedquery.Item3,procesedquery.Item2),suggestion);
 }
 }
 

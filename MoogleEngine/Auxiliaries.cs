@@ -27,23 +27,7 @@ punto y las magnitudes de cada vector)
 */
 public static double CosineSimilarity(double[] search,double[] document)
 {
-  double similarity;
-  double pointproduct = 0;
-  double semimagnitudeofsearch =0;
-  double semimagnitudeofdocument =0;
-  for (int i = 0; i < search.Length; i++)
-  {
-    if(search[i]!=0 && document[i]!=0)
-     pointproduct += search[i]*document[i];
-      if(search[i]!=0)
-     semimagnitudeofsearch += Math.Pow(search[i],2);
-     if(document[i]!=0)
-     semimagnitudeofdocument += Math.Pow(document[i],2);
-  }
-  double magnitudeofsearch = Math.Sqrt(semimagnitudeofsearch);
-  double magnitudeofdocument = Math.Sqrt(semimagnitudeofdocument);
-  similarity = pointproduct/(magnitudeofsearch*magnitudeofdocument);
-  return similarity;
+  return new Vector(search).CosineSimilarity(new Vector(document));
 }
 
 //Metodo que separa una columna indicada de una matrix
@@ -595,16 +579,19 @@ public static Tuple<double[],Dictionary<string,string>,string> WordsofSearch(str
   }
 
    string[] wordsLevenshtein = wordsforLevenshtein.ToArray();
+   Dictionary<string,string> wordstochange = new Dictionary<string, string>();
    /* Si ocurre esto se procede a llamar al método Suggestion para obtener dicha sugerencia y se
    modifican los valores del vector de búsqueda para responder a la sugerencia */
   if (wordsLevenshtein.Length>0)
   {
-    foreach (var dic in (Suggestion(search,wordsLevenshtein,listwords,3)).Item2)
+    Tuple<string,Dictionary<string,string>> suggestionResult = Suggestion(search,wordsLevenshtein,listwords,3);
+    foreach (var dic in suggestionResult.Item2)
     {
       int pos = Array.IndexOf(listwords,dic.Value);
       tfidfofsearch[pos]+=1;
     }
-    suggestion=Suggestion(search,wordsLevenshtein,listwords,3).Item1;
+    suggestion=suggestionResult.Item1;
+    wordstochange = suggestionResult.Item2;
   }
   
   for (int i = 0; i < tfidfofsearch.Length; i++)
@@ -612,14 +599,13 @@ public static Tuple<double[],Dictionary<string,string>,string> WordsofSearch(str
     tfidfofsearch[i]/= tfidfofsearch.Length;
   }
 
-  Dictionary<string,string> wordstochange = Suggestion(search,wordsLevenshtein,listwords,3).Item2;
-
 // Se aplica el operador * y se modifican los valores de las palabras correspondientes según cuantos *(s) presenten
- if (WordswithAsterisk(search,suggestion,wordstochange).Item2[0]!=0)
+ Tuple<string[],int[]> asteriskResult = WordswithAsterisk(search,suggestion,wordstochange);
+ if (asteriskResult.Item2[0]!=0)
     {
-      for (int j = 0; j < WordswithAsterisk(search,suggestion,wordstochange).Item1.Length; j++)
+      for (int j = 0; j < asteriskResult.Item1.Length; j++)
       {
-        tfidfofsearch[Array.IndexOf(listwords,WordswithAsterisk(search,suggestion,wordstochange).Item1[j])]*=2*(WordswithAsterisk(search,suggestion,wordstochange).Item2[j]);
+        tfidfofsearch[Array.IndexOf(listwords,asteriskResult.Item1[j])]*=2*(asteriskResult.Item2[j]);
       }
     }
     for (int i = 0; i < tfidfofsearch.Length; i++)
@@ -633,7 +619,7 @@ public static Tuple<double[],Dictionary<string,string>,string> WordsofSearch(str
 }
 
 //Método que busca score ,title y snippet dada una busqueda
-public static MoogleEngine.SearchItem[] RelevantDocuments(string search ,double[] tfidfofsearch,string[]documents,double[,]tfidfofdocuments,string[]listofwords,string suggestion,Dictionary<string,string> wordstochange)
+public static MoogleEngine.SearchItem[] RelevantDocuments(string search ,double[] tfidfofsearch,string[]documents, string[][] cachedDocs, double[,]tfidfofdocuments,string[]listofwords,string suggestion,Dictionary<string,string> wordstochange)
 {
   //Se crea una lista de objetos SearchItem para ir almacenando los valores que se vayan encontrando
   List<MoogleEngine.SearchItem> scoreofrelevantdocuments = new List<MoogleEngine.SearchItem>();
@@ -647,21 +633,23 @@ public static MoogleEngine.SearchItem[] RelevantDocuments(string search ,double[
     a 0 y cumplimiento de los requisitos de los operadores Inclusion y Exclusion) */
     double[] temporal = ExtracColumn(tfidfofdocuments,i);
     double score = CosineSimilarity(tfidfofsearch,temporal);
-    if (score>0 && Exclusion(search,DataBase.Document(documents[i]),suggestion,wordstochange) && Inclusion(search,DataBase.Document(documents[i]),suggestion,wordstochange))
+    string[] doc = cachedDocs[i];
+    if (score>0 && Exclusion(search,doc,suggestion,wordstochange) && Inclusion(search,doc,suggestion,wordstochange))
     {
       //Si lo hacen se procede a calcular y añadir el bono del operador cercanía si es necesario
       if (closesearch.Item1!=0)
       {
-        if(Close(closesearch,DataBase.Document(documents[i]))!=0)
+        double bonus = Close(closesearch,doc);
+        if(bonus!=0)
         {
-        score+=Close(closesearch,DataBase.Document(documents[i]));
+        score+=bonus;
         }
       }
       /* Se utiliza el índice para relacionar el número del documento que se está analizando con su
       título, se procede a obtener el snippet correspondiente, se crea un SearchItem con estos objetos
       y se añade a los resultados */
       string title = index[i];
-      string snippet = Snippet(search,DataBase.Document(documents[i]),documents,listofwords,tfidfofsearch);
+      string snippet = Snippet(search,doc,documents,listofwords,tfidfofsearch);
       
       scoreofrelevantdocuments.Add(new MoogleEngine.SearchItem(title, snippet, (float) score));
     }
