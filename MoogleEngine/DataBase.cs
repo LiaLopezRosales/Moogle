@@ -1,83 +1,302 @@
-﻿using System.Text;
+using System.Collections.Concurrent;
+using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
 
 namespace MoogleEngine;
 
-public class DataBase
+public partial class DataBase : IDataBase, IDisposable
 {
-  public MoogleEngine.InvertedIndex Index { get; private set; }
-
-  public DataBase()
+  volatile IInvertedIndex? _index;
+  public IInvertedIndex Index
   {
-    string ruta = Directory.GetParent(Path.Combine(Directory.GetCurrentDirectory()))!.FullName!;
-    string file = Path.Combine(ruta, "Content");
-    if (!Directory.Exists(file))
-      throw new DirectoryNotFoundException($"La carpeta 'Content' no existe. Se esperaba en: {file}");
+    get => _index ?? throw new InvalidOperationException("Index not initialized");
+    private set => _index = value;
+  }
 
-    string[] directions = Directory.GetFiles(file, "*txt*", SearchOption.AllDirectories);
-    if (directions.Length == 0)
-      throw new InvalidOperationException($"No se encontraron archivos .txt en la carpeta 'Content' ({file}). Agrega documentos de texto antes de ejecutar la aplicación.");
+  readonly ILogger<DataBase>? _logger;
+  readonly IStemmer _stemmer;
+  readonly string? _contentPath;
 
-    Index = MoogleEngine.InvertedIndex.Build(directions);
+  const int CacheMaxSize = 100;
+  readonly ConcurrentDictionary<string, LinkedListNode<CacheEntry>> _cache = new();
+  readonly LinkedList<CacheEntry> _cacheList = new();
+  readonly object _cacheLock = new();
+
+  FileSystemWatcher? _watcher;
+  Timer? _rebuildTimer;
+  readonly object _rebuildLock = new();
+  bool _disposed;
+  private static readonly char[] separator = new[] { ' ' };
+
+  record CacheEntry(string Query, Tuple<SearchItem[], string> Result);
+
+  Tuple<SearchItem[], string>? TryCache(string query)
+  {
+    lock (_cacheLock)
+    {
+      if (_cache.TryGetValue(query, out var node))
+      {
+        _cacheList.Remove(node);
+        _cacheList.AddFirst(node);
+        return node.Value.Result;
+      }
+    }
+    return null;
+  }
+
+  void AddCache(string query, Tuple<SearchItem[], string> result)
+  {
+    lock (_cacheLock)
+    {
+      if (_cache.TryGetValue(query, out var existingNode))
+      {
+        _cacheList.Remove(existingNode);
+        _cache.TryRemove(query, out _);
+      }
+
+      var node = _cacheList.AddFirst(new CacheEntry(query, result));
+      _cache[query] = node;
+
+      if (_cacheList.Count > CacheMaxSize)
+      {
+        var last = _cacheList.Last;
+        if (last != null)
+        {
+          _cache.TryRemove(last.Value.Query, out _);
+          _cacheList.RemoveLast();
+        }
+      }
+    }
+  }
+
+  public DataBase() : this(FindContentPath(), null, new Stemmer()) { }
+
+  public DataBase(ILogger<DataBase>? logger) : this(FindContentPath(), logger, new Stemmer()) { }
+
+  public DataBase(string contentPath) : this(contentPath, null, new Stemmer()) { }
+
+  public DataBase(string contentPath, ILogger<DataBase>? logger)
+    : this(contentPath, logger, new Stemmer()) { }
+
+  public DataBase(IInvertedIndex index, IStemmer? stemmer = null, ILogger<DataBase>? logger = null)
+  {
+    _stemmer = stemmer ?? new Stemmer();
+    _logger = logger;
+    Index = index;
+    _logger?.LogInformation("Indexed {VocabCount} terms from {DocCount} docs", Index.VocabCount, Index.DocCount);
+  }
+
+  DataBase(string contentPath, ILogger<DataBase>? logger, IStemmer stemmer)
+  {
+    _stemmer = stemmer;
+    _logger = logger;
+
+    if (!Directory.Exists(contentPath))
+    {
+      _logger?.LogError("Content directory not found at {ContentPath}", contentPath);
+      throw new DirectoryNotFoundException($"Content directory not found at: {contentPath}");
+    }
+
+    string[] files = Directory.GetFiles(contentPath, "*txt*", SearchOption.AllDirectories);
+    if (files.Length == 0)
+    {
+      _logger?.LogError("No .txt files found in Content directory at {ContentPath}", contentPath);
+      throw new InvalidOperationException($"No .txt files found in Content directory ({contentPath}). Add text documents before running the application.");
+    }
+
+    _logger?.LogInformation("Indexing {FileCount} documents from {ContentPath}", files.Length, contentPath);
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    Index = InvertedIndex.Build(files);
+    sw.Stop();
+    _logger?.LogInformation("Indexed {VocabCount} terms from {FileCount} docs in {ElapsedMs}ms",
+      Index.VocabCount, files.Length, sw.ElapsedMilliseconds);
+
+    _contentPath = contentPath;
+    StartWatching();
+  }
+
+  void StartWatching()
+  {
+    if (_contentPath == null || !Directory.Exists(_contentPath)) return;
+
+    _watcher = new FileSystemWatcher(_contentPath, "*txt*")
+    {
+      NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.CreationTime,
+      IncludeSubdirectories = false,
+      EnableRaisingEvents = true
+    };
+
+    _watcher.Changed += OnContentChanged;
+    _watcher.Created += OnContentChanged;
+    _watcher.Deleted += OnContentChanged;
+    _watcher.Renamed += OnContentChanged;
+
+    _logger?.LogInformation("Watching Content directory for changes: {ContentPath}", _contentPath);
+  }
+
+  void OnContentChanged(object sender, FileSystemEventArgs e)
+  {
+    lock (_rebuildLock)
+    {
+      _rebuildTimer?.Dispose();
+      _rebuildTimer = new Timer(_ => RebuildIndex(), null, TimeSpan.FromMilliseconds(500), Timeout.InfiniteTimeSpan);
+    }
+  }
+
+  void RebuildIndex()
+  {
+    if (_contentPath == null) return;
+    try
+    {
+      _logger?.LogInformation("Content changed — rebuilding index");
+      var sw = System.Diagnostics.Stopwatch.StartNew();
+      string[] files = Directory.GetFiles(_contentPath, "*txt*", SearchOption.AllDirectories);
+      if (files.Length == 0)
+      {
+        _logger?.LogWarning("No .txt files after content change — index left unchanged");
+        return;
+      }
+      var newIndex = InvertedIndex.Build(files);
+      sw.Stop();
+      Index = newIndex;
+      lock (_cacheLock)
+      {
+        _cache.Clear();
+        _cacheList.Clear();
+      }
+      _logger?.LogInformation("Re-indexed {VocabCount} terms from {FileCount} docs in {ElapsedMs}ms",
+        Index.VocabCount, files.Length, sw.ElapsedMilliseconds);
+    }
+    catch (Exception ex)
+    {
+      _logger?.LogError(ex, "Failed to rebuild index after content change");
+    }
+  }
+
+  static string FindContentPath()
+  {
+    string dir = Directory.GetParent(Path.Combine(Directory.GetCurrentDirectory()))!.FullName!;
+    return Path.Combine(dir, "Content");
   }
 
   public static string[] NormalizeString(string content)
   {
-    return MoogleEngine.InvertedIndex.ProcessText(content);
+    return InvertedIndex.ProcessText(content);
   }
 
-  static readonly Regex nonAlphaRegex = new("[^a-zA-Z0-9 -]");
-  public static string NormalizeExpresion(string content)
+  public static string NormalizeExpression(string content)
   {
     content = content.ToLower();
-    content = nonAlphaRegex.Replace(content.Normalize(NormalizationForm.FormD), "");
+    content = InvertedIndex.NonAlphaRegex.Replace(content.Normalize(NormalizationForm.FormD), "");
     return content;
   }
 
-  public Tuple<MoogleEngine.SearchItem[], string> Query(string query)
+  public Tuple<SearchItem[], string> Query(string query)
   {
-    var idx = Index;
-    string[] rawWords = query.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+    ArgumentNullException.ThrowIfNull(query);
 
-    // 1. Normalize and stem
+    _logger?.LogDebug("Query: {Query}", query);
+
+    var cached = TryCache(query);
+    if (cached != null)
+    {
+      _logger?.LogDebug("Cache hit for: {Query}", query);
+      return cached;
+    }
+
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var idx = Index;
+    string[] rawWords = query.Split(separator, StringSplitOptions.RemoveEmptyEntries);
+
     string[] stemmed = NormalizeString(query);
     if (stemmed.Length == 0)
       return NoResults();
 
-    // 2. Build query weights: map wordId → weight
-    var queryWeights = new Dictionary<int, double>();
-    var unknownWords = new List<string>();
-    var suggestionInfo = new Dictionary<string, string>();
+    // Build query weights from stemmed words
+    var (Weights, UnknownWords) = BuildQueryWeights(stemmed, idx);
 
-    foreach (var w in stemmed)
-    {
-      if (idx.WordToId.TryGetValue(w, out int wid))
-        queryWeights[wid] = queryWeights.GetValueOrDefault(wid) + 1.0;
-      else
-        unknownWords.Add(w);
-    }
-
-    // 3. Suggestions for unknown words
+    // Suggestions for unknown words
     string suggestion = "";
-    if (unknownWords.Count > 0)
+    var suggestionInfo = new Dictionary<string, string>();
+    if (UnknownWords.Count > 0)
     {
-      string[] vocab = idx.Vocabulary.ToArray();
-      var sugResult = Auxiliaries.Suggestion(query, unknownWords.ToArray(), vocab, 3);
+      string[] vocab = [.. idx.Vocabulary];
+      var sugResult = Auxiliaries.Suggestion(query, [.. UnknownWords], vocab, 3);
       suggestion = sugResult.Item1;
       suggestionInfo = sugResult.Item2;
       foreach (var kvp in suggestionInfo)
       {
         if (idx.WordToId.TryGetValue(kvp.Value, out int sugWid))
-          queryWeights[sugWid] = queryWeights.GetValueOrDefault(sugWid) + 1.0;
+          Weights[sugWid] = Weights.GetValueOrDefault(sugWid) + 1.0;
       }
     }
 
-    // 4. Synonym expansion
-    int totalDocs = idx.DocCount;
+    // Synonym expansion
+    ExpandSynonyms(rawWords, Weights, idx);
+
+    if (Weights.Count == 0)
+      return NoResults(suggestion);
+
+    // * operator multiplier
+    ApplyAsterisk(query, suggestionInfo, Weights, idx);
+
+    // Query-time stop word filter
+    FilterStopWords(Weights, idx);
+
+    // Score documents using inverted index
+    var scores = ScoreDocuments(Weights, idx);
+
+    if (scores.Count == 0)
+      return NoResults(suggestion);
+
+    // Parse !, ^, ~ operators
+    var excludeWords = ParseOpWords(query, @"\!\w+\b", suggestionInfo);
+    var includeWords = ParseOpWords(query, @"\^\w+\b", suggestionInfo);
+    var closePairs = ParseCloseQuery(query, suggestionInfo);
+
+    // Filter candidates
+    var filtered = FilterCandidates(scores, excludeWords, includeWords, closePairs, idx, stemmed.Length);
+
+    if (filtered.Count == 0)
+      return NoResults(suggestion);
+
+    // Sort and build results
+    filtered.Sort((a, b) => b.score.CompareTo(a.score));
+    var items = BuildSearchItems(filtered, idx, Weights);
+
+    string sug = suggestion ?? "";
+    sw.Stop();
+    _logger?.LogInformation("Query \"{Query}\": {ResultCount} results in {ElapsedMs}ms",
+      query, items.Count, sw.ElapsedMilliseconds);
+
+    var result = Tuple.Create(items.ToArray(), sug);
+    AddCache(query, result);
+    return result;
+  }
+
+  static (Dictionary<int, double> Weights, List<string> UnknownWords) BuildQueryWeights(string[] stemmed, IInvertedIndex idx)
+  {
+    var weights = new Dictionary<int, double>();
+    var unknown = new List<string>();
+
+    foreach (var w in stemmed)
+    {
+      if (idx.WordToId.TryGetValue(w, out int wid))
+        weights[wid] = weights.GetValueOrDefault(wid) + 1.0;
+      else
+        unknown.Add(w);
+    }
+
+    return (weights, unknown);
+  }
+
+  static void ExpandSynonyms(string[] rawWords, Dictionary<int, double> queryWeights, IInvertedIndex idx)
+  {
     foreach (var raw in rawWords)
     {
-      string clean = NormalizeExpresion(raw);
-      var syns = MoogleEngine.Synonyms.Get(clean);
+      string clean = NormalizeExpression(raw);
+      var syns = Synonyms.Get(clean);
       if (syns == null) continue;
 
       string stemSyn = SpanishStemmer.Stem(clean);
@@ -95,17 +314,31 @@ public class DataBase
         }
       }
     }
+  }
 
-    if (queryWeights.Count == 0)
-      return NoResults(suggestion);
+  static void FilterStopWords(Dictionary<int, double> queryWeights, IInvertedIndex idx)
+  {
+    if (queryWeights.Count == 0) return;
 
-    // 5. Apply * operator multiplier
-    ApplyAsterisk(query, suggestionInfo, queryWeights, idx);
+    bool hasRare = false;
+    foreach (int wid in queryWeights.Keys)
+      if (idx.Idf[wid] >= idx.IdfThreshold) { hasRare = true; break; }
 
-    // 6. Score candidate documents using inverted index (sparse)
+    if (!hasRare) return;
+
+    var rareWeights = new Dictionary<int, double>();
+    foreach (var kvp in queryWeights)
+      if (idx.Idf[kvp.Key] >= idx.IdfThreshold)
+        rareWeights[kvp.Key] = kvp.Value;
+    queryWeights.Clear();
+    foreach (var kvp in rareWeights)
+      queryWeights[kvp.Key] = kvp.Value;
+  }
+
+  static Dictionary<int, double> ScoreDocuments(Dictionary<int, double> queryWeights, IInvertedIndex idx)
+  {
     var scores = new Dictionary<int, double>();
-    int[] queryWordIds = queryWeights.Keys.ToArray();
-    foreach (int wid in queryWordIds)
+    foreach (int wid in queryWeights.Keys)
     {
       double weight = queryWeights[wid];
       var postings = idx.Postings[wid];
@@ -117,73 +350,75 @@ public class DataBase
         scores[docId] = scores.GetValueOrDefault(docId) + weight * tf * idx.Idf[wid];
       }
     }
+    return scores;
+  }
 
-    if (scores.Count == 0)
-      return NoResults(suggestion);
-
-    // 7. Parse ! and ^ operators from the raw query
-    var excludeWords = ParseOpWords(query, @"\!\w+\b", suggestionInfo);
-    var includeWords = ParseOpWords(query, @"\^\w+\b", suggestionInfo);
-    var closePairs = ParseCloseQuery(query, suggestionInfo);
-
-    // 8. Filter and finalize candidates
+  static List<(int docId, double score)> FilterCandidates(
+    Dictionary<int, double> scores,
+    HashSet<string> excludeWords,
+    HashSet<string> includeWords,
+    List<(string, string)> closePairs,
+    IInvertedIndex idx,
+    int queryLen)
+  {
     var filtered = new List<(int docId, double score)>();
 
     foreach (var kvp in scores)
     {
       int docId = kvp.Key;
-      double score = kvp.Value;
+      double score = kvp.Value / queryLen;
 
-      // Normalize by query length
-      score /= stemmed.Length;
+      if (IsExcluded(docId, excludeWords, idx)) continue;
+      if (!HasRequiredWords(docId, includeWords, idx)) continue;
 
-      // ! operator: exclude docs that contain the excluded word
-      bool excluded = false;
-      foreach (string ew in excludeWords)
-      {
-        if (idx.WordToId.TryGetValue(ew, out int ewId))
-        {
-          var ep = idx.Postings[ewId];
-          for (int pi = 0; pi < ep.Count; pi += 2)
-          {
-            if (ep[pi] == docId) { excluded = true; break; }
-          }
-        }
-        if (excluded) break;
-      }
-      if (excluded) continue;
-
-      // ^ operator: only keep docs that contain all required words
-      bool hasAll = true;
-      foreach (string iw in includeWords)
-      {
-        if (!idx.WordToId.TryGetValue(iw, out int iwId)) { hasAll = false; break; }
-        var ip = idx.Postings[iwId];
-        bool found = false;
-        for (int pi = 0; pi < ip.Count; pi += 2)
-        {
-          if (ip[pi] == docId) { found = true; break; }
-        }
-        if (!found) { hasAll = false; break; }
-      }
-      if (!hasAll) continue;
-
-      // ~ proximity bonus
       if (closePairs.Count > 0)
         score += ComputeProximityBonus(closePairs, idx.DocPaths[docId]);
 
       filtered.Add((docId, score));
     }
 
-    if (filtered.Count == 0)
-      return NoResults(suggestion);
+    return filtered;
+  }
 
-    // 9. Sort by score descending
-    filtered.Sort((a, b) => b.score.CompareTo(a.score));
+  static bool IsExcluded(int docId, HashSet<string> excludeWords, IInvertedIndex idx)
+  {
+    foreach (string ew in excludeWords)
+    {
+      if (idx.WordToId.TryGetValue(ew, out int ewId))
+      {
+        var ep = idx.Postings[ewId];
+        for (int pi = 0; pi < ep.Count; pi += 2)
+          if (ep[pi] == docId) return true;
+      }
+    }
+    return false;
+  }
 
-    // 10. Build SearchItems with snippets (re-read top docs from disk)
-    var items = new List<MoogleEngine.SearchItem>();
+  static bool HasRequiredWords(int docId, HashSet<string> includeWords, IInvertedIndex idx)
+  {
+    foreach (string iw in includeWords)
+    {
+      if (!idx.WordToId.TryGetValue(iw, out int iwId)) return false;
+      var ip = idx.Postings[iwId];
+      bool found = false;
+      for (int pi = 0; pi < ip.Count; pi += 2)
+      {
+        if (ip[pi] == docId) { found = true; break; }
+      }
+      if (!found) return false;
+    }
+    return true;
+  }
+
+  static List<SearchItem> BuildSearchItems(List<(int docId, double score)> filtered, IInvertedIndex idx, Dictionary<int, double> queryWeights)
+  {
+    var items = new List<SearchItem>();
     int maxResults = Math.Min(filtered.Count, 30);
+
+    var importantWords = new HashSet<string>();
+    foreach (int wid in queryWeights.Keys)
+      importantWords.Add(idx.Vocabulary[wid]);
+
     for (int i = 0; i < maxResults; i++)
     {
       int docId = filtered[i].docId;
@@ -192,36 +427,29 @@ public class DataBase
           .ToLowerInvariant()
           .Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
 
-      // Build important-words set for snippet from query weights
-      var importantWords = new HashSet<string>();
-      foreach (int wid in queryWeights.Keys)
-        importantWords.Add(idx.Vocabulary[wid]);
-      string snippet = Auxiliaries.Snippet(query, docWords, idx.DocPaths, importantWords);
-      items.Add(new MoogleEngine.SearchItem(title, snippet, (float)filtered[i].score));
+      string snippet = Auxiliaries.Snippet(docWords, importantWords);
+      items.Add(new SearchItem(title, snippet, (float)filtered[i].score));
     }
 
-    string sug = suggestion ?? "";
-
-    return Tuple.Create(items.ToArray(), sug);
+    return items;
   }
 
-  static Tuple<MoogleEngine.SearchItem[], string> NoResults(string suggestion = "")
+  static Tuple<SearchItem[], string> NoResults(string suggestion = "")
   {
     string sug = suggestion ?? "";
     return Tuple.Create(
-      new[] { new MoogleEngine.SearchItem("No se encontraron textos coincidentes", "Por favor realice una busqueda diferente", 0f) },
+      new[] { new SearchItem("No se encontraron textos coincidentes", "Por favor realice una busqueda diferente", 0f) },
       sug
     );
   }
 
-  // Parse ! or ^ operators: returns stemmed words (with suggestion substitution)
   static HashSet<string> ParseOpWords(string search, string pattern, Dictionary<string, string> wordstochange)
   {
     var result = new HashSet<string>();
     Match m = Regex.Match(search, pattern);
     while (m.Success)
     {
-      string clean = NormalizeExpresion(m.Value);
+      string clean = NormalizeExpression(m.Value);
       string stemmed = SpanishStemmer.Stem(clean);
       if (wordstochange.TryGetValue(clean, out string? sug))
         stemmed = SpanishStemmer.Stem(sug);
@@ -231,14 +459,13 @@ public class DataBase
     return result;
   }
 
-  // Parse * operator: multiply weights in the queryWeights dictionary
-  static void ApplyAsterisk(string search, Dictionary<string, string> wordstochange, Dictionary<int, double> queryWeights, MoogleEngine.InvertedIndex idx)
+  static void ApplyAsterisk(string search, Dictionary<string, string> wordstochange, Dictionary<int, double> queryWeights, IInvertedIndex idx)
   {
-    Match m = Regex.Match(search, @"\*+\w+\b");
+    Match m = MyRegex().Match(search);
     while (m.Success)
     {
       int starCount = m.Value.Count(c => c == '*');
-      string clean = NormalizeExpresion(m.Value);
+      string clean = NormalizeExpression(m.Value);
       string stemmed = SpanishStemmer.Stem(clean);
       if (wordstochange.TryGetValue(clean, out string? sug))
         stemmed = SpanishStemmer.Stem(sug);
@@ -248,16 +475,14 @@ public class DataBase
     }
   }
 
-  // Parse ~ operator: returns list of (word1, word2) pairs (stemmed)
   static List<(string, string)> ParseCloseQuery(string search, Dictionary<string, string> wordstochange)
   {
     var result = new List<(string, string)>();
-    string[] parts = search.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+    string[] parts = search.Split(separator, StringSplitOptions.RemoveEmptyEntries);
 
-    // Apply suggestion substitution
     for (int k = 0; k < parts.Length; k++)
     {
-      string clean = NormalizeExpresion(parts[k]);
+      string clean = NormalizeExpression(parts[k]);
       if (wordstochange.TryGetValue(clean, out string? sug))
         parts[k] = sug;
     }
@@ -266,8 +491,8 @@ public class DataBase
     {
       if (parts[i] == "~" && i > 0 && i < parts.Length - 1)
       {
-        string w1 = SpanishStemmer.Stem(NormalizeExpresion(parts[i - 1]));
-        string w2 = SpanishStemmer.Stem(NormalizeExpresion(parts[i + 1]));
+        string w1 = SpanishStemmer.Stem(NormalizeExpression(parts[i - 1]));
+        string w2 = SpanishStemmer.Stem(NormalizeExpression(parts[i + 1]));
         if (w1 != w2)
           result.Add((w1, w2));
       }
@@ -275,10 +500,9 @@ public class DataBase
     return result;
   }
 
-  // Proximity bonus: re-read doc from disk and compute min distance
   static double ComputeProximityBonus(List<(string, string)> pairs, string docPath)
   {
-    string[] words = MoogleEngine.InvertedIndex.ProcessText(File.ReadAllText(docPath));
+    string[] words = InvertedIndex.ProcessText(File.ReadAllText(docPath));
     double totalBonus = 0;
 
     foreach (var (w1, w2) in pairs)
@@ -303,4 +527,28 @@ public class DataBase
     }
     return totalBonus;
   }
+
+  public void Dispose()
+  {
+    if (_disposed) return;
+    _disposed = true;
+
+    lock (_rebuildLock)
+    {
+      _rebuildTimer?.Dispose();
+      _rebuildTimer = null;
+    }
+
+    if (_watcher != null)
+    {
+      _watcher.EnableRaisingEvents = false;
+      _watcher.Dispose();
+      _watcher = null;
+    }
+
+    GC.SuppressFinalize(this);
+  }
+
+  [GeneratedRegex(@"\*+\w+\b")]
+  private static partial Regex MyRegex();
 }

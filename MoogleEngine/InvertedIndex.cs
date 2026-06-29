@@ -1,35 +1,36 @@
-using System.Collections.Concurrent;
 using System.Text;
 using System.Text.RegularExpressions;
 
 namespace MoogleEngine;
 
-public class InvertedIndex
+public partial class InvertedIndex : IInvertedIndex
 {
-  public List<string> Vocabulary { get; private set; } = new();
-  public Dictionary<string, int> WordToId { get; private set; } = new();
-  public List<int>[] Postings { get; private set; } = Array.Empty<List<int>>();
-  public string[] DocNames { get; private set; } = Array.Empty<string>();
-  public string[] DocPaths { get; private set; } = Array.Empty<string>();
-  public int[] DocLengths { get; private set; } = Array.Empty<int>();
-  public double[] Idf { get; private set; } = Array.Empty<double>();
+  public List<string> Vocabulary { get; private set; } = [];
+  public Dictionary<string, int> WordToId { get; private set; } = [];
+  public List<int>[] Postings { get; private set; } = [];
+  public string[] DocNames { get; private set; } = [];
+  public string[] DocPaths { get; private set; } = [];
+  public int[] DocLengths { get; private set; } = [];
+  public double[] Idf { get; private set; } = [];
+  public double IdfThreshold { get; private set; }
 
   public int DocCount => DocNames.Length;
   public int VocabCount => Vocabulary.Count;
 
-  static readonly Regex nonAlphaRegex = new("[^a-zA-Z0-9 -]");
+  internal static readonly Regex NonAlphaRegex = MyRegex();
+  private static readonly char[] separator = new[] { ' ' };
 
   static string Normalize(string content)
   {
     content = content.ToLower();
-    content = nonAlphaRegex.Replace(content.Normalize(NormalizationForm.FormD), "");
+    content = NonAlphaRegex.Replace(content.Normalize(NormalizationForm.FormD), "");
     return content;
   }
 
   public static string[] ProcessText(string text)
   {
     string norm = Normalize(text);
-    string[] tokens = norm.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+    string[] tokens = norm.Split(separator, StringSplitOptions.RemoveEmptyEntries);
     for (int i = 0; i < tokens.Length; i++)
       tokens[i] = SpanishStemmer.Stem(tokens[i]);
     return tokens;
@@ -82,77 +83,35 @@ public class InvertedIndex
           wordId = vocab.Count;
           vocab.Add(kvp.Key);
           wordToId[kvp.Key] = wordId;
-          postings.Add(new List<int>());
+          postings.Add([]);
         }
         postings[wordId].Add(docId);
         postings[wordId].Add(kvp.Value);
       }
     }
 
-    // Phase 3: Stop word removal — filter words with anomalously low IDF
+    // Phase 3: Compute IDF for all words and determine stop-word threshold
     int totalDocs = fileCount;
-    double idfSum = 0, idfSumSq = 0;
     int vocabCount = vocab.Count;
+    double idfThreshold = 0;
 
     double[] idfValues = new double[vocabCount];
-    for (int i = 0; i < vocabCount; i++)
-    {
-      int df = postings[i].Count / 2;
-      double idf = Math.Log10((double)totalDocs / Math.Max(df, 1));
-      idfValues[i] = idf;
-      idfSum += idf;
-      idfSumSq += idf * idf;
-    }
-
     if (vocabCount > 0)
     {
+      double idfSum = 0, idfSumSq = 0;
+      for (int i = 0; i < vocabCount; i++)
+      {
+        int df = postings[i].Count / 2;
+        double idf = Math.Log10((double)totalDocs / Math.Max(df, 1));
+        idfValues[i] = idf;
+        idfSum += idf;
+        idfSumSq += idf * idf;
+      }
+
       double mean = idfSum / vocabCount;
-      double stddev = Math.Sqrt(idfSumSq / vocabCount - mean * mean);
-      double threshold = mean - stddev;
-
-      // Mark words to keep
-      var keep = new bool[vocabCount];
-      int keepCount = 0;
-      for (int i = 0; i < vocabCount; i++)
-      {
-        if (idfValues[i] >= threshold)
-        {
-          keep[i] = true;
-          keepCount++;
-        }
-      }
-
-      // Rebuild compact vocabulary and postings
-      var newVocab = new List<string>(keepCount);
-      var newWordToId = new Dictionary<string, int>(keepCount);
-      var newPostings = new List<List<int>>(keepCount);
-      var oldToNew = new int[vocabCount];
-      Array.Fill(oldToNew, -1);
-
-      for (int i = 0; i < vocabCount; i++)
-      {
-        if (keep[i])
-        {
-          int newId = newVocab.Count;
-          oldToNew[i] = newId;
-          newVocab.Add(vocab[i]);
-          newWordToId[vocab[i]] = newId;
-          newPostings.Add(postings[i]);
-        }
-      }
-
-      // Rebuild IDF array
-      var newIdf = new double[keepCount];
-      for (int i = 0; i < vocabCount; i++)
-      {
-        if (keep[i])
-          newIdf[oldToNew[i]] = idfValues[i];
-      }
-
-      vocab = newVocab;
-      wordToId = newWordToId;
-      postings = newPostings;
-      idfValues = newIdf;
+      double variance = Math.Max(0, idfSumSq / vocabCount - mean * mean);
+      double stddev = Math.Sqrt(variance);
+      idfThreshold = mean - stddev;
     }
 
     // Phase 4: Load synonyms
@@ -167,11 +126,15 @@ public class InvertedIndex
     {
       Vocabulary = vocab,
       WordToId = wordToId,
-      Postings = postings.ToArray(),
+      Postings = [.. postings],
       DocNames = docNames,
       DocPaths = docPaths,
       DocLengths = docLengths,
-      Idf = idfValues
+      Idf = idfValues,
+      IdfThreshold = idfThreshold
     };
   }
+
+  [GeneratedRegex("[^a-zA-Z0-9 -]")]
+  private static partial Regex MyRegex();
 }

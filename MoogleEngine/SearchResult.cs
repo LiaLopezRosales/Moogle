@@ -1,28 +1,20 @@
 namespace MoogleEngine;
 
-public class SearchResult
+public class SearchResult(SearchItem[] items, string suggestion = "")
 {
-    private SearchItem[] items;
+  private readonly SearchItem[] items = items ?? throw new ArgumentNullException("items");
 
-    public SearchResult(SearchItem[] items, string suggestion="")
-    {
-        if (items == null) {
-            throw new ArgumentNullException("items");
-        }
+  public SearchResult() : this([])
+  {
 
-        this.items = items;
-        this.Suggestion = suggestion;
-    }
+  }
 
-    public SearchResult() : this(new SearchItem[0]) {
+  public string Suggestion { get; private set; } = suggestion;
 
-    }
+  public IEnumerable<SearchItem> Items()
+  {
+    return this.items;
+  }
 
-    public string Suggestion { get; private set; }
-
-    public IEnumerable<SearchItem> Items() {
-        return this.items;
-    }
-
-    public int Count { get { return this.items.Length; } }
+  public int Count { get { return this.items.Length; } }
 }

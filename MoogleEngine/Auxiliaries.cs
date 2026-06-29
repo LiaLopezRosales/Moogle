@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 
 namespace MoogleEngine;
 
@@ -20,7 +20,7 @@ class Auxiliaries
         int cost = a[i - 1] == b[j - 1] ? 0 : 1;
         curr[j] = Math.Min(Math.Min(curr[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
       }
-      var temp = prev; prev = curr; curr = temp;
+      (curr, prev) = (prev, curr);
     }
     return prev[n];
   }
@@ -28,7 +28,7 @@ class Auxiliaries
   internal static Tuple<string, Dictionary<string, string>> Suggestion(string search, string[] wordsLevenshtein, string[] listwords, int similaritythreshold)
   {
     string[] normsearch = DataBase.NormalizeString(search);
-    string oldsearch = DataBase.NormalizeExpresion(search);
+    string oldsearch = DataBase.NormalizeExpression(search);
     string suggestion = "";
     var similarwords = new Dictionary<string, string>();
     for (int i = 0; i < wordsLevenshtein.Length; i++)
@@ -66,15 +66,7 @@ class Auxiliaries
     return Tuple.Create(suggestion, similarwords);
   }
 
-  public static string Snippet(string search, string[] documentx, string[] directions, string[] listofwords, double[] procesedsearch)
-  {
-    var important = new HashSet<string>();
-    for (int i = 0; i < procesedsearch.Length; i++)
-      if (procesedsearch[i] > 0) important.Add(listofwords[i]);
-    return Snippet(search, documentx, directions, important);
-  }
-
-  public static string Snippet(string search, string[] documentx, string[] directions, HashSet<string> importantwords)
+  public static string Snippet(string[] documentx, HashSet<string> importantwords)
   {
     string result = "";
     int inicialindex = 0;
@@ -134,7 +126,7 @@ class Auxiliaries
     for (int n = inicialindex; n < finalindex + 1; n++)
     {
       string word = documentx[n];
-      string stemmed = SpanishStemmer.Stem(DataBase.NormalizeExpresion(word));
+      string stemmed = SpanishStemmer.Stem(DataBase.NormalizeExpression(word));
       if (importantwords.Contains(stemmed))
         result += "<strong>" + word + "</strong>";
       else

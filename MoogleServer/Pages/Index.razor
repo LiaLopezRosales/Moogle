@@ -150,10 +150,9 @@
         {
             result = await Task.Run(() => Moogle.Query(query));
         }
-        catch (Exception ex)
+        catch
         {
             result = new SearchResult();
-            Console.Error.WriteLine($"Moogle.Query error: {ex}");
         }
 
         sw.Stop();

@@ -1,0 +1,10 @@
+services:
+  moogle:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./Content:/app/Content
+    restart: unless-stopped

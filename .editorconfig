@@ -1,0 +1,21 @@
+root = true
+
+[*]
+indent_style = space
+insert_final_newline = true
+charset = utf-8
+end_of_line = lf
+trim_trailing_whitespace = true
+
+[*.{cs,razor,cshtml}]
+indent_size = 2
+indent_style = space
+
+[*.{json,xml,yml,yaml}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.txt]
+indent_size = 4

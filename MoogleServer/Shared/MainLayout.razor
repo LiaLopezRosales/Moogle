@@ -33,7 +33,7 @@
     {
         if (firstRender)
         {
-            await JS.InvokeVoidAsync("eval", $"document.documentElement.setAttribute('data-theme','{Theme}')");
+            await JS.InvokeVoidAsync("setTheme", Theme);
         }
     }
 
@@ -41,6 +41,6 @@
     {
         Theme = Theme == "dark" ? "light" : "dark";
         await JS.InvokeVoidAsync("localStorage.setItem", "moogle_theme", Theme);
-        await JS.InvokeVoidAsync("eval", $"document.documentElement.setAttribute('data-theme','{Theme}')");
+        await JS.InvokeVoidAsync("setTheme", Theme);
     }
 }
