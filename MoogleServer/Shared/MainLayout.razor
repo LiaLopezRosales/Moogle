@@ -1,11 +1,46 @@
 ﻿@inherits LayoutComponentBase
-
-<PageTitle>MoogleServer</PageTitle>
+@inject IJSRuntime JS
 
 <div class="page">
+    <nav class="top-bar">
+        <button class="theme-btn" @onclick="ToggleTheme" title="Toggle theme / Cambiar tema">
+            @ThemeIcon
+        </button>
+    </nav>
     <main>
-        <article class="content px-4 py-4 text-center">
+        <div class="content">
             @Body
-        </article>
+        </div>
     </main>
 </div>
+
+@code {
+    string Theme { get; set; } = "light";
+
+    string ThemeIcon => Theme == "dark" ? "🌙" : "☀️";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var saved = await JS.InvokeAsync<string>("localStorage.getItem", "moogle_theme");
+            if (saved == "dark" || saved == "light") Theme = saved;
+        }
+        catch { }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("eval", $"document.documentElement.setAttribute('data-theme','{Theme}')");
+        }
+    }
+
+    async Task ToggleTheme()
+    {
+        Theme = Theme == "dark" ? "light" : "dark";
+        await JS.InvokeVoidAsync("localStorage.setItem", "moogle_theme", Theme);
+        await JS.InvokeVoidAsync("eval", $"document.documentElement.setAttribute('data-theme','{Theme}')");
+    }
+}

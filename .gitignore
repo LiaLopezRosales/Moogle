@@ -454,3 +454,7 @@ $RECYCLE.BIN/
 !.vscode/extensions.json
 
 *.txt
+
+# Moogle project specific
+*.docx
+.opencode/

@@ -1,50 +1,174 @@
 ﻿@page "/"
 @using Microsoft.AspNetCore.Components.Web
+@using System.Diagnostics
+@inject IJSRuntime JS
 
 <PageTitle>Moogle!</PageTitle>
 
-<h1>🔍 Moogle!</h1>
+<div class="search-area @(hasSearched ? "has-results" : "")">
+    <div class="search-logo">
+        <span>M</span><span>o</span><span>o</span><span>g</span><span>l</span><span>e</span><span class="excl">!</span>
+    </div>
 
-<div class="search-box">
-    <input @bind="query" @onkeydown="HandleKey" placeholder="Introduzca su búsqueda">
-    <button type="default" class="btn btn-primary" @onclick="RunQuery">🔍 Buscar</button>
+    @if (!hasSearched)
+    {
+        <div class="search-subtitle">@SubtitleLabel</div>
+    }
+
+    <div class="search-box">
+        <input @bind="query" @bind:event="oninput" @onkeydown="HandleKey" placeholder="@Placeholder" disabled="@loading" aria-label="@Placeholder" />
+        <button @onclick="RunQuery" disabled="@loading" aria-label="@SearchButtonLabel">🔍</button>
+    </div>
+
+    <div class="search-lang">
+        <span class="@LangClassES" @onclick="SetLangES">ES</span>
+        <span class="lang-sep">|</span>
+        <span class="@LangClassEN" @onclick="SetLangEN">EN</span>
+    </div>
 </div>
 
-@if (!string.IsNullOrEmpty(result.Suggestion)) {
+@if (loading)
+{
+    <div class="stats-bar"><span class="spinner"></span> @SearchingLabel</div>
+}
+
+@if (!loading && hasSearched)
+{
+    <div class="stats-bar">@StatsLabel</div>
+}
+
+@if (!loading && !string.IsNullOrEmpty(result.Suggestion) && hasSearched)
+{
     <div class="suggestion">
-        <p>¿Quisiste decir <strong><a href="#" @onclick:preventDefault @onclick="() => SearchSuggestion(result.Suggestion)">@result.Suggestion</a></strong>?</p>
+        @SuggestionPrefix <strong><a href="#" @onclick:preventDefault @onclick="() => SearchSuggestion(result.Suggestion)">@result.Suggestion</a></strong>?
     </div>
 }
 
-@if (result.Count > 0) {
-    <p class="result-count">@result.Count resultado(s) encontrado(s)</p>
+@if (!loading && hasSearched && result.Count == 0)
+{
+    <div class="no-results">
+        <p>@NoResultsLabel</p>
+        <div class="hint">@NoResultsHint</div>
+    </div>
 }
 
-<ul class="results">
-@foreach (var item in result.Items()) {
-    <li>
-        <div class="item">
-            <p class="title">@item.Title</p>
-            <p>... @((MarkupString)item.Snippet) ...</p>
-        </div>
-    </li>
+@if (!loading && hasSearched)
+{
+    <ul class="results">
+    @{
+        float maxScore = 1f;
+        var items = result.Items().ToArray();
+        if (items.Any()) maxScore = Math.Max(items.Max(i => i.Score), 0.001f);
+        int idx = 0;
+    }
+    @foreach (var item in items)
+    {
+        float pct = item.Score / maxScore * 100;
+        <li class="result-item" style="animation-delay: @(idx * 0.04)s">
+            <div class="title">@item.Title</div>
+            <div class="result-path">📄 @(item.Title.ToLowerInvariant().Replace(' ', '-') + ".txt")</div>
+            <div class="snippet">@((MarkupString)item.Snippet)</div>
+            <div class="score-row">
+                <div class="score-bar-track">
+                    <div class="score-bar-fill" style="width: @pct%"></div>
+                </div>
+                <span class="score-label">@item.Score.ToString("F2")</span>
+            </div>
+        </li>
+        idx++;
+    }
+    </ul>
 }
-</ul>
 
 @code {
+    private string lang = "es";
     private string query = "";
-    private SearchResult result = new SearchResult();
+    private SearchResult result = new();
+    private bool loading = false;
+    private bool hasSearched = false;
+    private Stopwatch sw = new();
+    private long elapsedMs = 0;
 
-    private void RunQuery() {
-        result = Moogle.Query(query);
+    bool IsEn => lang == "en";
+
+    string LangClassES => IsEn ? "lang-inactive" : "lang-active";
+    string LangClassEN => IsEn ? "lang-active" : "lang-inactive";
+
+    string SubtitleLabel => IsEn ? "Search your .txt documents" : "Busca en tus documentos .txt";
+    string Placeholder => IsEn ? "Search documents..." : "Introduzca su búsqueda";
+    string SearchingLabel => IsEn ? "Searching..." : "Buscando...";
+    string SuggestionPrefix => IsEn ? "Did you mean" : "¿Quisiste decir";
+    string NoResultsLabel => IsEn
+        ? "No matching documents found."
+        : "No se encontraron textos coincidentes.";
+    string SearchButtonLabel => IsEn ? "Search" : "Buscar";
+    string NoResultsHint => IsEn
+        ? "Try a different query."
+        : "Pruebe con otra búsqueda.";
+    string StatsLabel
+    {
+        get
+        {
+            int n = result.Count;
+            if (IsEn)
+                return $"{n} result{(n == 1 ? "" : "s")} in {elapsedMs} ms";
+            return $"{n} resultado{(n == 1 ? "" : "s")} en {elapsedMs} ms";
+        }
     }
 
-    private void HandleKey(KeyboardEventArgs e) {
-        if (e.Key == "Enter") RunQuery();
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var saved = await JS.InvokeAsync<string>("localStorage.getItem", "moogle_lang");
+            if (saved == "en" || saved == "es") lang = saved;
+        }
+        catch { }
     }
 
-    private void SearchSuggestion(string suggestion) {
+    async Task SetLangES()
+    {
+        lang = "es";
+        await JS.InvokeVoidAsync("localStorage.setItem", "moogle_lang", "es");
+    }
+
+    async Task SetLangEN()
+    {
+        lang = "en";
+        await JS.InvokeVoidAsync("localStorage.setItem", "moogle_lang", "en");
+    }
+
+    async Task RunQuery()
+    {
+        if (string.IsNullOrWhiteSpace(query)) return;
+        loading = true;
+        hasSearched = true;
+        sw.Restart();
+        StateHasChanged();
+
+        try
+        {
+            result = await Task.Run(() => Moogle.Query(query));
+        }
+        catch (Exception ex)
+        {
+            result = new SearchResult();
+            Console.Error.WriteLine($"Moogle.Query error: {ex}");
+        }
+
+        sw.Stop();
+        elapsedMs = sw.ElapsedMilliseconds;
+        loading = false;
+    }
+
+    async Task HandleKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await RunQuery();
+    }
+
+    async Task SearchSuggestion(string suggestion)
+    {
         query = suggestion;
-        result = Moogle.Query(suggestion);
+        await RunQuery();
     }
 }
