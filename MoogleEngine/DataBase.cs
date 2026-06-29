@@ -7,6 +7,7 @@ public class DataBase
   Tuple<string[],int[,],int[],int[]> procesed; 
   double[,] tfidf;
   string[][] docs;
+  public Dictionary<string,int> wordIndex = null!;
  /*Constructor con el cual al llamar "new DataBase()" cree nuestra base de datos de los documentos 
   presentes en la carpeta content(ejecuta los métodos(presentes en su mayoría en esta misma clase)
   en el orden adecuado para este proposito)*/
@@ -31,6 +32,14 @@ public class DataBase
     {
       docs[i] = Document(directions[i]);
     }
+
+    wordIndex = new Dictionary<string, int>();
+    for (int i = 0; i < procesed.Item1.Length; i++)
+      wordIndex[procesed.Item1[i]] = i;
+
+    string synPath = Path.Combine(file, "synonyms.txt");
+    if (File.Exists(synPath))
+      MoogleEngine.Synonyms.Load(synPath);
   }
     
   //Método para procesar un texto
@@ -59,11 +68,11 @@ public static string[] NormalizeString(string content)
 return temporal;
 }
 //Metodo que normaliza una string
+static readonly Regex nonAlphaRegex = new("[^a-zA-Z0-9 -]");
 public static string NormalizeExpresion(string content)
 {
   content = content.ToLower();
- Regex patron = new Regex("[^a-zA-Z0-9 -]");
- content = patron.Replace(content.Normalize(NormalizationForm.FormD),"");
+  content = nonAlphaRegex.Replace(content.Normalize(NormalizationForm.FormD),"");
  return content;
 }
 
@@ -108,6 +117,36 @@ private static Tuple<string[],int[,],int[],int[]> UniqueWords(string[] direction
       } 
       lengthofdocuments[i]=temporal.Length;
    }
+
+   // Automatic stop word removal: filter words whose IDF is anomalously low
+   int totalDocs = directions.Length;
+   double idfSum = 0, idfSumSq = 0;
+   int vocabCount = 0;
+   foreach (var arr in uniqueword.Values)
+   {
+     int df = arr[arr.Length - 1];
+     double idf = Math.Log10((double)totalDocs / df);
+     idfSum += idf;
+     idfSumSq += idf * idf;
+     vocabCount++;
+   }
+   if (vocabCount > 0)
+   {
+     double mean = idfSum / vocabCount;
+     double stddev = Math.Sqrt(idfSumSq / vocabCount - mean * mean);
+     double threshold = mean - stddev;
+     var toRemove = new List<string>();
+     foreach (var kvp in uniqueword)
+     {
+       int df = kvp.Value[kvp.Value.Length - 1];
+       double idf = Math.Log10((double)totalDocs / df);
+       if (idf < threshold)
+         toRemove.Add(kvp.Key);
+     }
+     foreach (var key in toRemove)
+       uniqueword.Remove(key);
+   }
+
    string[] words = uniqueword.Keys.ToArray();
    int[,] frecuency = new int[words.Length,directions.Length];
    int k =0;
@@ -182,7 +221,7 @@ en cuyo caso se le asigna el mensaje  "No hay sugerencias disponibles para esta 
 */
 public Tuple<MoogleEngine.SearchItem[],string> Query(string query)
 { 
-  Tuple<double[],Dictionary<string,string>,string> procesedquery =Auxiliaries.WordsofSearch(query,directions,procesed.Item1,procesed.Item3);
+  Tuple<double[],Dictionary<string,string>,string> procesedquery =Auxiliaries.WordsofSearch(query,directions,procesed.Item1,procesed.Item3,wordIndex);
  double[] queryvector = procesedquery.Item1;
  string suggestion = procesedquery.Item3;
  if (suggestion=="")

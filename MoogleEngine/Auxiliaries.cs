@@ -359,32 +359,25 @@ private static double Close(Tuple<int,string[]> procesed,string[]documentx)
 }
 
 //Distancia de Levenshtein (a)(fórmula clásica del algoritmo de la Distancia de Levenshtein)
-private static int LevenshteinDistance(string wordofsearch,string word )
+private static int LevenshteinDistance(string a, string b)
 {
-  int[,] distance = new int[wordofsearch.Length+1,word.Length+1];
-  for (int i = 0; i < distance.GetLength(0); i++)
+  int m = a.Length, n = b.Length;
+  if (m == 0) return n;
+  if (n == 0) return m;
+  int[] prev = new int[n + 1];
+  int[] curr = new int[n + 1];
+  for (int j = 0; j <= n; j++) prev[j] = j;
+  for (int i = 1; i <= m; i++)
   {
-    distance[i,0]=i;
-  }
-  for (int j = 0; j < distance.GetLength(1); j++)
-  {
-    distance[0,j]=j;
-  }
-  for (int k = 1; k < distance.GetLength(0); k++)
-  {
-    for (int m = 1; m < distance.GetLength(1); m++)
+    curr[0] = i;
+    for (int j = 1; j <= n; j++)
     {
-      int change;
-      if (wordofsearch[k-1]==word[m-1])
-      {
-        change=0;
-      }
-      else{change=1;}
-      int temporal = Math.Min((distance[k-1,m]+1),distance[k,m-1]+1);
-      distance[k,m]= Math.Min(temporal,distance[k-1,m-1]+change);
+      int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+      curr[j] = Math.Min(Math.Min(curr[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
     }
+    var temp = prev; prev = curr; curr = temp;
   }
-  return distance[wordofsearch.Length,word.Length];
+  return prev[n];
 }
 
 //Método principal de la búsqueda de sugerencia apoyado en el aloritmo de distancia de Levenstein
@@ -406,8 +399,11 @@ private static Tuple<string,Dictionary<string,string>> Suggestion(string search,
     string temporal = wordsLevenshtein[i];
     string tempword = "";
     int tempmin = int.MaxValue;
+    int lenTemporal = temporal.Length;
     for (int j = 0; j < listwords.Length; j++)
     {
+      int lenVocab = listwords[j].Length;
+      if (Math.Abs(lenTemporal - lenVocab) > similaritythreshold) continue;
       if (LevenshteinDistance(temporal,listwords[j])<tempmin)
       {
         tempmin = LevenshteinDistance(temporal,listwords[j]);
@@ -453,10 +449,10 @@ relevante del texto dada esa búsqueda) */
 public static string Snippet(string search,string[] documentx,string[]directions,string[]listofwords,double[]procesedsearch)
 {
   string result = "";
-  List<string> importantwords = new List<string>();
+  HashSet<string> importantwords = new HashSet<string>();
   
   string[] newsearch = DataBase.NormalizeString(search);
-  ;
+  
   int inicialindex=0;
   int finalindex=0;
   
@@ -468,7 +464,6 @@ public static string Snippet(string search,string[] documentx,string[]directions
       importantwords.Add(listofwords[i]); 
     }
   }
-  string[] words = importantwords.ToArray();
   int count =0;
 
   /* Se hace un conteo inicial de relevancia del primer fragmento del texto(cantidad de veces que
@@ -478,7 +473,7 @@ public static string Snippet(string search,string[] documentx,string[]directions
   {
     for (int i = 0,j=50; i < j; i++)
   {
-    if (words.Contains(documentx[i]))
+    if (importantwords.Contains(documentx[i]))
     {
       count+=1; 
     }
@@ -489,7 +484,7 @@ public static string Snippet(string search,string[] documentx,string[]directions
   {
     for (int i = 0,j=documentx.Length/2; i < j; i++)
   {
-    if (words.Contains(documentx[i]))
+    if (importantwords.Contains(documentx[i]))
     {
       count+=1;
     }
@@ -505,21 +500,21 @@ public static string Snippet(string search,string[] documentx,string[]directions
   influir en los nuevos cálculos) */
   for (int k = inicialindex+1,m=finalindex; m < documentx.Length; k++,m++)
   {
-    if ((!words.Contains(documentx[m]))&&(!words.Contains(documentx[k])))
+    if ((!importantwords.Contains(documentx[m]))&&(!importantwords.Contains(documentx[k])))
     {
       continue;
     }
     
-    if (!words.Contains(documentx[k])&& words.Contains(documentx[m]))
+    if (!importantwords.Contains(documentx[k])&& importantwords.Contains(documentx[m]))
     {
       temporal+=1;
     }
     
-      if(!words.Contains(documentx[m])&&words.Contains(documentx[k]))
+      if(!importantwords.Contains(documentx[m])&&importantwords.Contains(documentx[k]))
     {
       temporal-=1;
     }
-    if(words.Contains(documentx[m])&&words.Contains(documentx[k]))
+    if(importantwords.Contains(documentx[m])&&importantwords.Contains(documentx[k]))
     {
       temporal+=1;
      if (temporal>count)
@@ -543,14 +538,17 @@ public static string Snippet(string search,string[] documentx,string[]directions
 //Se elabora el snippet final ya teniendo el índice inicial y final del fragmento 
   for (int n = inicialindex; n < finalindex+1; n++)
   {
-    result+=documentx[n];
+    if (importantwords.Contains(documentx[n]))
+      result+="<strong>"+documentx[n]+"</strong>";
+    else
+      result+=documentx[n];
     result+=" ";
   }
   return result;
 }
 
 //Metodo que vectoriza la búsqueda(Con operador * incluido y sugerencia)
-public static Tuple<double[],Dictionary<string,string>,string> WordsofSearch(string search, string[] directions,string[] listwords,int[]filescontainingword)
+public static Tuple<double[],Dictionary<string,string>,string> WordsofSearch(string search, string[] directions,string[] listwords,int[]filescontainingword, Dictionary<string,int> wordIndex)
 {
 
 /*Se normaliza la búsqueda y se vectoriza con las operaciones ya conocidas(las mismas utilizadas
@@ -565,10 +563,9 @@ public static Tuple<double[],Dictionary<string,string>,string> WordsofSearch(str
   
   for (int i = 0; i < words.Length; i++)
   {
-      if (listwords.Contains(words[i]))
+      if (wordIndex.TryGetValue(words[i], out int pos))
       {
-        int position =Array.IndexOf(listwords,words[i]);
-        tfidfofsearch[position]+=1;
+        tfidfofsearch[pos]+=1;
       }
       /* Se aprovecha la necesidad de analizar cada palabra de la búsqueda y se elabora un conjunto
       de términos no pertenecientes al vocabulario para la búsqueda de una sugerencia */
@@ -587,11 +584,38 @@ public static Tuple<double[],Dictionary<string,string>,string> WordsofSearch(str
     Tuple<string,Dictionary<string,string>> suggestionResult = Suggestion(search,wordsLevenshtein,listwords,3);
     foreach (var dic in suggestionResult.Item2)
     {
-      int pos = Array.IndexOf(listwords,dic.Value);
-      tfidfofsearch[pos]+=1;
+      if (wordIndex.TryGetValue(dic.Value, out int sugPos))
+        tfidfofsearch[sugPos]+=1;
     }
     suggestion=suggestionResult.Item1;
     wordstochange = suggestionResult.Item2;
+  }
+
+  // Synonym expansion: boost closely related words at reduced weight
+  int totalDocCount = directions.Length;
+  foreach (var raw in search.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+  {
+    string clean = DataBase.NormalizeExpresion(raw);
+    var syns = MoogleEngine.Synonyms.Get(clean);
+    if (syns == null) continue;
+
+    // Only expand if the original word itself is in the vocabulary
+    string stemmed = SpanishStemmer.Stem(clean);
+    if (!wordIndex.TryGetValue(stemmed, out int origIdx)) continue;
+
+    double origIdf = Math.Log10((double)totalDocCount / filescontainingword[origIdx]);
+    double groupWeight = 0.3 / syns.Length;
+
+    foreach (var syn in syns)
+    {
+      string synStemmed = SpanishStemmer.Stem(syn);
+      if (wordIndex.TryGetValue(synStemmed, out int synIdx) && synIdx != origIdx)
+      {
+        double synIdf = Math.Log10((double)totalDocCount / filescontainingword[synIdx]);
+        double idfRatio = Math.Min(synIdf / Math.Max(origIdf, 0.001), 1.0);
+        tfidfofsearch[synIdx] += groupWeight * idfRatio;
+      }
+    }
   }
   
   for (int i = 0; i < tfidfofsearch.Length; i++)
@@ -605,7 +629,8 @@ public static Tuple<double[],Dictionary<string,string>,string> WordsofSearch(str
     {
       for (int j = 0; j < asteriskResult.Item1.Length; j++)
       {
-        tfidfofsearch[Array.IndexOf(listwords,asteriskResult.Item1[j])]*=2*(asteriskResult.Item2[j]);
+        if (wordIndex.TryGetValue(asteriskResult.Item1[j], out int astPos))
+          tfidfofsearch[astPos]*=2*(asteriskResult.Item2[j]);
       }
     }
     for (int i = 0; i < tfidfofsearch.Length; i++)

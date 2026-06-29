@@ -1,17 +1,23 @@
 ﻿@page "/"
+@using Microsoft.AspNetCore.Components.Web
 
 <PageTitle>Moogle!</PageTitle>
 
 <h1>🔍 Moogle!</h1>
 
-<input class="p-1 my-4" @bind="query" placeholder="Introduzca su búsqueda">
-
-<button type="default" class="btn btn-primary" @onclick="RunQuery">🔍 Buscar</button>
+<div class="search-box">
+    <input @bind="query" @onkeydown="HandleKey" placeholder="Introduzca su búsqueda">
+    <button type="default" class="btn btn-primary" @onclick="RunQuery">🔍 Buscar</button>
+</div>
 
 @if (!string.IsNullOrEmpty(result.Suggestion)) {
     <div class="suggestion">
-        <p>¿Quisite decir <strong><a href="#">@result.Suggestion</a></strong>?</p>
+        <p>¿Quisiste decir <strong><a href="#" @onclick:preventDefault @onclick="() => SearchSuggestion(result.Suggestion)">@result.Suggestion</a></strong>?</p>
     </div>
+}
+
+@if (result.Count > 0) {
+    <p class="result-count">@result.Count resultado(s) encontrado(s)</p>
 }
 
 <ul class="results">
@@ -19,7 +25,7 @@
     <li>
         <div class="item">
             <p class="title">@item.Title</p>
-            <p>... @item.Snippet ...</p>
+            <p>... @((MarkupString)item.Snippet) ...</p>
         </div>
     </li>
 }
@@ -31,5 +37,14 @@
 
     private void RunQuery() {
         result = Moogle.Query(query);
+    }
+
+    private void HandleKey(KeyboardEventArgs e) {
+        if (e.Key == "Enter") RunQuery();
+    }
+
+    private void SearchSuggestion(string suggestion) {
+        query = suggestion;
+        result = Moogle.Query(suggestion);
     }
 }
